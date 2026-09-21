@@ -141,7 +141,8 @@ public final class Updater {
     String url = manifest.get("url").getAsString();
     String sha = manifest.has("sha256") ? manifest.get("sha256").getAsString().trim() : "";
 
-    if (compareVersions(version, currentVersion()) <= 0) {
+    int cmp = compareVersions(version, currentVersion());
+    if (cmp < 0 || (cmp == 0 && currentJarMatches(sha))) {
       lastResult = "up to date (v" + currentVersion() + ")";
       return lastResult;
     }
@@ -212,6 +213,21 @@ public final class Updater {
       }
     }
     return null;
+  }
+
+  /**
+   * True when the manifest sha is blank or matches the currently loaded jar,
+   * i.e. a same-version manifest really is the build already running. A
+   * same-version manifest with a DIFFERENT sha means a re-build must stage.
+   */
+  private boolean currentJarMatches(String sha) {
+    if (sha.isBlank()) return true;
+    try {
+      Path jar = plugin.pluginFile().toPath();
+      return jar.toFile().exists() && sha.equalsIgnoreCase(sha256(jar));
+    } catch (Exception e) {
+      return true; // can't verify - don't loop re-staging on every check
+    }
   }
 
   private static String sha256(Path file) throws Exception {
