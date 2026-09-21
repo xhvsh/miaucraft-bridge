@@ -156,7 +156,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     try {
       presence.shutdown();
       positions.shutdown();
-      chat.notice("Server went offline");
+      chat.notice("Server offline");
       sinks.flushAll().get(5, TimeUnit.SECONDS);
       state.save();
     } catch (Exception e) {
@@ -255,7 +255,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     if (!firstConfigApplied && cfg.version() > 0) {
       firstConfigApplied = true;
       sinks.flushAll();
-      chat.notice("Server is online");
+      chat.notice("Server online");
     }
     rescheduleTasks();
   }
