@@ -1,6 +1,6 @@
 ﻿{
-    "version":  "2.2.2",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.2.jar",
-    "sha256":  "11ec2718c7cac48088c85bd0b32d0865e6ea97c8f70b9cbed9c33ba681be47e3",
-    "notes":  "Server join/leave chat notices; updater also stages same-version rebuilds (sha-aware)"
+    "version":  "2.2.4",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.4.jar",
+    "sha256":  "a2c35f290376291e8a8a9437382463d79bc36f2467591a46bc82fa1318aa48dd",
+    "notes":  "Minecraft-style yellow join/leave notices; single-writer server online/offline notices (no more client duplicate rows)"
 }

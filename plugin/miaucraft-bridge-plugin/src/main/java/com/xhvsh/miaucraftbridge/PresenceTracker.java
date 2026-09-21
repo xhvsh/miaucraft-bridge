@@ -41,7 +41,7 @@ public final class PresenceTracker implements Listener {
   @EventHandler(priority = EventPriority.MONITOR)
   public void onJoin(PlayerJoinEvent e) {
     lastMoved.put(e.getPlayer().getUniqueId(), System.currentTimeMillis());
-    chat.notice(e.getPlayer().getName() + " joined the server");
+    chat.notice(e.getPlayer().getName() + " joined the game");
     if (!enabled()) return;
     write(e.getPlayer(), true, false);
   }
@@ -50,7 +50,7 @@ public final class PresenceTracker implements Listener {
   public void onQuit(PlayerQuitEvent e) {
     lastHeartbeat.remove(e.getPlayer().getUniqueId());
     lastMoved.remove(e.getPlayer().getUniqueId());
-    chat.notice(e.getPlayer().getName() + " left the server");
+    chat.notice(e.getPlayer().getName() + " left the game");
     if (!enabled()) return;
     write(e.getPlayer(), false, false);
   }

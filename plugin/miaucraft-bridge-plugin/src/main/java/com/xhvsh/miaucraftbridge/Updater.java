@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
@@ -242,7 +243,7 @@ public final class Updater {
     return HexFormat.of().formatHex(md.digest());
   }
 
-  /** Stages are applied here: write the swap config, launch the helper, stop. */
+  /** Stages are applied here: swap in place when possible, else via the detached helper. */
   public void apply(CommandSender sender) {
     if (!hasStaged()) {
       sender.sendMessage("§c[MiaucraftBridge] No staged update - run §f/bridge update §cfirst.");
@@ -253,19 +254,51 @@ public final class Updater {
       sender.sendMessage("§c[MiaucraftBridge] Can't locate my own jar (exploded/dev run?) - not applying.");
       return;
     }
+    String version = stagedVersion;
+    Path staged = stagedJar;
     try {
+      if (installInPlace(staged, target)) {
+        stagedJar = null;
+        stagedVersion = null;
+        lastResult = "installed v" + version + " in place";
+        sender.sendMessage("§a[MiaucraftBridge] Installed v" + version
+            + " - the server will restart now.");
+        log.info("update " + lastResult + " (" + target + ").");
+        Bukkit.getScheduler().runTask(plugin, Bukkit::shutdown);
+        return;
+      }
       Path conf = writeConf(target);
       launchHelper(conf);
-      sender.sendMessage("§a[MiaucraftBridge] Installing v" + stagedVersion
+      sender.sendMessage("§a[MiaucraftBridge] Installing v" + version
           + " - the server will restart now.");
-      log.info("Applying update v" + stagedVersion
-          + " (jar -> " + target + "), restarting.");
+      log.info("Applying update v" + version + " (jar -> " + target + "), restarting.");
       Bukkit.getScheduler().runTask(plugin, Bukkit::shutdown);
     } catch (Exception e) {
       lastResult = "apply failed: " + brief(e);
       log.warning("update " + lastResult);
       sender.sendMessage("§c[MiaucraftBridge] Update apply failed: " + brief(e));
     }
+  }
+
+  /**
+   * Replaces the running jar with the staged copy while the server is still
+   * up - POSIX lets us replace a file a JVM has open, so no detached helper
+   * is needed on Unix hosts (some servers kill or never start that helper).
+   * Returns false when the platform refuses the overwrite (e.g. a locked
+   * file on Windows), so the caller can defer to the detached helper.
+   */
+  private boolean installInPlace(Path staged, Path target) throws Exception {
+    if (!staged.equals(target)) {
+      try {
+        Files.copy(staged, target, StandardCopyOption.REPLACE_EXISTING);
+      } catch (IOException e) {
+        log.info("update: in-place install not possible (" + brief(e)
+            + ") - using detached helper");
+        return false;
+      }
+    }
+    Files.deleteIfExists(staged);
+    return true;
   }
 
   private Path ownJar() {
@@ -366,7 +399,14 @@ public final class Updater {
       // setsid fully detaches from this process group / controlling terminal.
       String line = "setsid \"" + javaExe + "\" -cp \"" + cp + "\" " + main
           + " \"" + conf + "\" >/dev/null 2>&1 < /dev/null &";
-      new ProcessBuilder("sh", "-c", line).start();
+      try {
+        new ProcessBuilder("sh", "-c", line).start();
+      } catch (IOException e) {
+        // setsid is absent in some slim server images - nohup detaches well enough.
+        String alt = "nohup \"" + javaExe + "\" -cp \"" + cp + "\" " + main
+            + " \"" + conf + "\" >/dev/null 2>&1 < /dev/null &";
+        new ProcessBuilder("sh", "-c", alt).start();
+      }
     }
   }
 
