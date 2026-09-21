@@ -8,7 +8,7 @@
     "name": "Miaucraft"
   },
   "status": {
-    "heartbeat-seconds": 25
+    "heartbeat-seconds": 8
   },
   "collectors": {
     "presence": {
