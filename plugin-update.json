@@ -1,6 +1,6 @@
 ﻿{
-    "version":  "2.2.9",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.9.jar",
-    "sha256":  "0cf2d026ea933b14117256817ed5fb7bfdee4a1a0fcf34f130aafc1a6f64d6d9",
-    "notes":  "player_achievements rows always include completed_at (was missing when not done, causing PGRST102); requires the Supabase grants already applied to service_role on player_achievement_criteria"
+    "version":  "2.2.10",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.10.jar",
+    "sha256":  "3efa6aa5762840408cf2b6b9a835c47d8823d51cbe5df792c0358701abab1ad5",
+    "notes":  "Reconcile achievements for OFFLINE players by reading the server's <level>/advancements/<uuid>.json files every 15 minutes (offline-scan-seconds); shares signatures with the online scan so no double-writes"
 }

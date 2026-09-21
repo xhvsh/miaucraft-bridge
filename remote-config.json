@@ -42,7 +42,8 @@
     "achievements": {
       "enabled": true,
       "catalog-sync": true,
-      "progress-scan-seconds": 30
+      "progress-scan-seconds": 30,
+      "offline-scan-seconds": 900
     },
     "status": {
       "enabled": true

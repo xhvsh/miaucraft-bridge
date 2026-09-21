@@ -198,6 +198,9 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     long achScan = Math.max(10, cfg.collectorLong("achievements", "progress-scan-seconds", 30)) * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimer(this, achievements::scanOnline, 200L, achScan));
 
+    long achOffline = Math.max(30, cfg.collectorLong("achievements", "offline-scan-seconds", 900)) * 20L;
+    tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, achievements::scanOffline, 600L, achOffline));
+
     long reconcile = Math.max(1, cfg.collectorLong("stats", "reconcile-minutes", 15)) * 60L * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, stats::reconcile, reconcile, reconcile));
 

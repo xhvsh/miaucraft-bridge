@@ -13,9 +13,16 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerAdvancementDoneEvent;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -222,5 +229,155 @@ public final class AchievementCollector implements Listener {
           "player_id", "achievement_key", "criterion_key").add(row);
       critSig.put(critKey, criterionDone);
     }
+  }
+
+  // ------------------------------------------------------------ offline scan
+
+  /**
+   * Reconciles achievements for players who aren't online by reading Minecraft's
+   * on-disk advancement storage (<level>/advancements/<uuid>.json). Bukkit only
+   * exposes live progress for online players, but the game writes the full
+   * done/criteria state (with epoch-millis timestamps) to this file for every
+   * player, so offline progress can be recovered from here. Shares the same
+   * in-memory signatures as the online scan, so the two never double-enqueue.
+   */
+  public void scanOffline() {
+    RemoteConfig cfg = config.get();
+    if (!cfg.collectorEnabled("achievements")) return;
+    if (!scanning.compareAndSet(false, true)) return;
+    try {
+      File worldFolder = Bukkit.getWorlds().stream().findFirst()
+          .map(w -> w.getWorldFolder()).orElse(null);
+      if (worldFolder == null) return;
+      File advDir = new File(worldFolder, "advancements");
+      if (!advDir.isDirectory()) return;
+
+      Map<String, List<String>> critNamesByKey = new HashMap<>();
+      Map<String, Integer> totals = new HashMap<>();
+      Iterator<Advancement> it = Bukkit.advancementIterator();
+      while (it.hasNext()) {
+        Advancement advancement = it.next();
+        if (advancement.getDisplay() == null) continue;
+        String key = advancement.getKey().toString();
+        List<String> names = new java.util.ArrayList<>(advancement.getCriteria());
+        critNamesByKey.put(key, names);
+        totals.put(key, names.size());
+      }
+
+      File[] files = advDir.listFiles();
+      if (files == null) return;
+      int players = 0;
+      int changed = 0;
+      for (File file : files) {
+        String name = file.getName();
+        if (!name.endsWith(".json")) continue;
+        String playerId = name.substring(0, name.length() - 5);
+        UUID uuid;
+        try {
+          uuid = UUID.fromString(playerId);
+        } catch (Exception e) {
+          continue;
+        }
+        org.bukkit.OfflinePlayer player = Bukkit.getOfflinePlayer(uuid);
+        if (player.getName() == null) continue;
+        try {
+          changed += collectOfflineFile(playerId, file, critNamesByKey, totals);
+          players++;
+        } catch (Exception ex) {
+          log.log(Level.WARNING, "Offline achievement scan failed for " + playerId, ex);
+        }
+      }
+      lastScanMs = System.currentTimeMillis();
+      if (cfg.debugLog()) {
+        log.info("Offline achievement scan: " + players + " player(s), "
+            + changed + " changed (total files " + files.length + ").");
+      }
+    } finally {
+      scanning.set(false);
+    }
+  }
+
+  private int collectOfflineFile(String playerId, File file,
+      Map<String, List<String>> critNamesByKey, Map<String, Integer> totals) throws Exception {
+    JsonObject root;
+    try {
+      root = new com.google.gson.JsonParser().parse(Files.readString(file.toPath(), StandardCharsets.UTF_8))
+          .getAsJsonObject();
+    } catch (Exception e) {
+      return 0;
+    }
+    int changed = 0;
+    for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
+      String key = entry.getKey();
+      List<String> criteriaNames = critNamesByKey.get(key);
+      if (criteriaNames == null) continue;
+      Integer total = totals.get(key);
+      if (total == null) continue;
+
+      JsonObject val = entry.getValue().getAsJsonObject();
+      boolean done = val.has("done") && val.get("done").getAsBoolean();
+      long completedAtMs = 0L;
+      java.util.Set<String> awarded = new java.util.HashSet<>();
+      JsonObject criteria = val.has("criteria") ? val.getAsJsonObject("criteria") : null;
+      if (criteria != null) {
+        for (Map.Entry<String, JsonElement> c : criteria.entrySet()) {
+          JsonElement te = c.getValue();
+          if (te != null && te.isJsonPrimitive() && te.getAsJsonPrimitive().isNumber()) {
+            awarded.add(c.getKey());
+            completedAtMs = Math.max(completedAtMs, te.getAsLong());
+          }
+        }
+      }
+
+      String signature = awarded.size() + "/" + total + "/" + done;
+      String achKey = playerId + "|" + key;
+      if (!achSig.getOrDefault(achKey, "").equals(signature)) {
+        JsonObject row = new JsonObject();
+        row.addProperty("player_id", playerId);
+        row.addProperty("achievement_key", key);
+        row.addProperty("completed", done);
+        row.addProperty("criteria_done", awarded.size());
+        row.addProperty("criteria_total", total);
+        if (done && completedAtMs > 0L) {
+          row.addProperty("completed_at", Instant.ofEpochMilli(completedAtMs).toString());
+        } else {
+          row.add("completed_at", com.google.gson.JsonNull.INSTANCE);
+        }
+        row.addProperty("updated_at", BridgeUtil.nowIso());
+        sinks.sink("player_achievements", "player_id,achievement_key", true,
+            "player_id", "achievement_key").add(row);
+        achSig.put(achKey, signature);
+        changed++;
+      }
+
+      for (String criterion : criteriaNames) {
+        String critKey = achKey + "|" + criterion;
+        boolean criterionDone = awarded.contains(criterion);
+        Boolean stored = critSig.get(critKey);
+        if (stored != null && stored.booleanValue() == criterionDone) continue;
+
+        JsonObject row = new JsonObject();
+        row.addProperty("player_id", playerId);
+        row.addProperty("achievement_key", key);
+        row.addProperty("criterion_key", criterion);
+        row.addProperty("done", criterionDone);
+        long ts = 0L;
+        if (criteria != null && criteria.has(criterion) && criteria.get(criterion).isJsonPrimitive()
+            && criteria.get(criterion).getAsJsonPrimitive().isNumber()) {
+          ts = criteria.get(criterion).getAsLong();
+        }
+        if (criterionDone && ts > 0L) {
+          row.addProperty("awarded_at", Instant.ofEpochMilli(ts).toString());
+        } else {
+          row.add("awarded_at", com.google.gson.JsonNull.INSTANCE);
+        }
+        row.addProperty("updated_at", BridgeUtil.nowIso());
+        sinks.sink("player_achievement_criteria", "player_id,achievement_key,criterion_key", true,
+            "player_id", "achievement_key", "criterion_key").add(row);
+        critSig.put(critKey, criterionDone);
+        changed++;
+      }
+    }
+    return changed;
   }
 }
