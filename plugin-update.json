@@ -1,6 +1,6 @@
 ﻿{
-    "version":  "2.2.8",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.8.jar",
-    "sha256":  "758ce4f6f65bbdde630c9edca143a7b88758ab766694889e9007ce71376caa0b",
-    "notes":  "Add /bridge drain: force-resends queued player achievement rows straight to Supabase and prints the raw HTTP code + response body to chat"
+    "version":  "2.2.9",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.9.jar",
+    "sha256":  "0cf2d026ea933b14117256817ed5fb7bfdee4a1a0fcf34f130aafc1a6f64d6d9",
+    "notes":  "player_achievements rows always include completed_at (was missing when not done, causing PGRST102); requires the Supabase grants already applied to service_role on player_achievement_criteria"
 }

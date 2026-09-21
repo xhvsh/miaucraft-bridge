@@ -191,6 +191,8 @@ public final class AchievementCollector implements Listener {
         } else {
           row.add("completed_at", com.google.gson.JsonNull.INSTANCE);
         }
+      } else {
+        row.add("completed_at", com.google.gson.JsonNull.INSTANCE);
       }
       row.addProperty("updated_at", BridgeUtil.nowIso());
       sinks.sink("player_achievements", "player_id,achievement_key", true,
