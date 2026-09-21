@@ -107,6 +107,35 @@ public class SupabaseRest {
     return send(sink, "DELETE", restPath(table, query), null, "return=minimal");
   }
 
+  /** One-shot upsert that reports the raw status code + body instead of throwing or backoff-ing. */
+  public CompletableFuture<RawResult> rawUpsert(String table, JsonArray rows, String onConflict) {
+    String url = restPath(table, "on_conflict=" + encode(onConflict));
+    HttpRequest.Builder builder = HttpRequest.newBuilder()
+        .uri(URI.create(url))
+        .timeout(Duration.ofSeconds(20))
+        .header("apikey", apiKey)
+        .header("Authorization", "Bearer " + apiKey)
+        .header("Prefer", "resolution=merge-duplicates,return=minimal")
+        .header("Content-Profile", schema)
+        .POST(body(rows));
+    return http.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString())
+        .thenApply(res -> new RawResult(res.statusCode(), res.body(), null))
+        .exceptionally(ex -> new RawResult(0, "",
+            String.valueOf(ex.getCause() != null ? ex.getCause() : ex)));
+  }
+
+  public static final class RawResult {
+    public final int code;
+    public final String body;
+    public final String error;
+
+    RawResult(int code, String body, String error) {
+      this.code = code;
+      this.body = body;
+      this.error = error;
+    }
+  }
+
   private String restPath(String table, String query) {
     return restBase + "/" + table + (query == null || query.isEmpty() ? "" : "?" + query);
   }

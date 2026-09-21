@@ -338,6 +338,47 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     return lines;
   }
 
+  /** Force-resend the queued achievement rows and print each raw HTTP result to chat. */
+  public void drainAchievements(CommandSender sender) {
+    sender.sendMessage("§e[MiaucraftBridge] Re-sending queued achievement rows (raw results below)...");
+    Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+      drainTable(sender, "player_achievements", "player_id,achievement_key");
+      drainTable(sender, "player_achievement_criteria", "player_id,achievement_key,criterion_key");
+    });
+  }
+
+  private void drainTable(CommandSender sender, String table, String onConflict) {
+    try {
+      List<com.google.gson.JsonObject> rows = sinks.pendingRows(table);
+      if (rows.isEmpty()) {
+        chatReply(sender, "§7" + table + ": nothing pending, skipping.");
+        return;
+      }
+      com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+      for (com.google.gson.JsonObject row : rows) arr.add(row);
+      SupabaseRest.RawResult res = rest.rawUpsert(table, arr, onConflict).get(20, TimeUnit.SECONDS);
+      if (res.error != null) {
+        chatReply(sender, "§c" + table + " -> transport error: " + res.error);
+      } else if (res.code >= 300) {
+        chatReply(sender, "§c" + table + " -> HTTP " + res.code + " body: "
+            + (res.body == null || res.body.isBlank() ? "--" : shortBody(res.body)));
+      } else {
+        chatReply(sender, "§a" + table + " -> HTTP " + res.code + " OK, " + rows.size()
+            + " row(s) submitted");
+      }
+    } catch (Exception e) {
+      chatReply(sender, "§c" + table + " -> probe exception: " + e);
+    }
+  }
+
+  private String shortBody(String s) {
+    return s.length() <= 400 ? s : s.substring(0, 400) + "...";
+  }
+
+  private void chatReply(CommandSender sender, String message) {
+    Bukkit.getScheduler().runTask(this, () -> sender.sendMessage(message));
+  }
+
   private String collectorSummary(RemoteConfig cfg) {
     StringBuilder sb = new StringBuilder();
     for (String name : List.of("presence", "positions", "stats", "achievements", "status", "whitelist", "chat")) {

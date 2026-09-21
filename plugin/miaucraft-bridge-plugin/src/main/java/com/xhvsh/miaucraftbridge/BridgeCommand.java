@@ -9,7 +9,7 @@ import java.util.List;
 
 public final class BridgeCommand implements CommandExecutor, TabCompleter {
 
-  private static final List<String> SUBCOMMANDS = List.of("reload", "status", "test", "stats", "update");
+  private static final List<String> SUBCOMMANDS = List.of("reload", "status", "test", "stats", "update", "drain");
   private static final List<String> UPDATE_ARGS = List.of("check", "apply", "status");
 
   private final MiaucraftBridgePlugin plugin;
@@ -31,6 +31,7 @@ public final class BridgeCommand implements CommandExecutor, TabCompleter {
       case "status" -> plugin.statusLines().forEach(sender::sendMessage);
       case "test" -> plugin.testConnection(sender);
       case "stats" -> plugin.forceStats(sender);
+      case "drain" -> plugin.drainAchievements(sender);
       case "update" -> {
         String action = args.length >= 2 ? args[1].toLowerCase() : "check";
         switch (action) {
@@ -45,6 +46,7 @@ public final class BridgeCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§e/bridge test §7- check the Supabase connection");
         sender.sendMessage("§e/bridge stats §7- force a stat reconcile now");
         sender.sendMessage("§e/bridge update [check|apply] §7- check for / install a newer jar");
+        sender.sendMessage("§e/bridge drain §7- force-resend queued achievement rows and show the raw result");
       }
     }
     return true;

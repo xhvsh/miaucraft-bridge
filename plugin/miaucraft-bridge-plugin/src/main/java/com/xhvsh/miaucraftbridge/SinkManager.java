@@ -3,6 +3,7 @@ package com.xhvsh.miaucraftbridge;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -85,6 +86,11 @@ public class SinkManager {
     return rest.lastFailure("sink:" + table);
   }
 
+  public List<JsonObject> pendingRows(String table) {
+    BatchSink sink = sinks.get(table);
+    return sink == null ? List.of() : sink.copyPending();
+  }
+
   public static final class BatchSink {
     private final SupabaseRest rest;
     private final String table;
@@ -128,6 +134,10 @@ public class SinkManager {
 
     public synchronized int size() {
       return pending.size();
+    }
+
+    public synchronized List<JsonObject> copyPending() {
+      return new ArrayList<>(pending.values());
     }
 
     public synchronized void clearRows() {

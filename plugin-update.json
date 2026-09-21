@@ -1,6 +1,6 @@
 ﻿{
-    "version":  "2.2.7",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.7.jar",
-    "sha256":  "7d92d5667b9d554a874a272b6fa7c5a87f61fa6615c4a865ae37a5cf17eaccc9",
-    "notes":  "/bridge status now reports per-table sink pending counts and the last HTTP error (no console logs needed); achievement writes self-heal on every boot"
+    "version":  "2.2.8",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.8.jar",
+    "sha256":  "758ce4f6f65bbdde630c9edca143a7b88758ab766694889e9007ce71376caa0b",
+    "notes":  "Add /bridge drain: force-resends queued player achievement rows straight to Supabase and prints the raw HTTP code + response body to chat"
 }
