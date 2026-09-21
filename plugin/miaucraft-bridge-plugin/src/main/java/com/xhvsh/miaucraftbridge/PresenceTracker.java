@@ -24,12 +24,14 @@ public final class PresenceTracker implements Listener {
 
   private final SinkManager sinks;
   private final Supplier<RemoteConfig> config;
+  private final ChatBridge chat;
   private final Map<UUID, Long> lastHeartbeat = new ConcurrentHashMap<>();
   private final Map<UUID, Long> lastMoved = new ConcurrentHashMap<>();
 
-  public PresenceTracker(SinkManager sinks, Supplier<RemoteConfig> config) {
+  public PresenceTracker(SinkManager sinks, Supplier<RemoteConfig> config, ChatBridge chat) {
     this.sinks = sinks;
     this.config = config;
+    this.chat = chat;
   }
 
   private boolean enabled() {
@@ -39,6 +41,7 @@ public final class PresenceTracker implements Listener {
   @EventHandler(priority = EventPriority.MONITOR)
   public void onJoin(PlayerJoinEvent e) {
     lastMoved.put(e.getPlayer().getUniqueId(), System.currentTimeMillis());
+    chat.notice(e.getPlayer().getName() + " joined the server");
     if (!enabled()) return;
     write(e.getPlayer(), true, false);
   }
@@ -47,6 +50,7 @@ public final class PresenceTracker implements Listener {
   public void onQuit(PlayerQuitEvent e) {
     lastHeartbeat.remove(e.getPlayer().getUniqueId());
     lastMoved.remove(e.getPlayer().getUniqueId());
+    chat.notice(e.getPlayer().getName() + " left the server");
     if (!enabled()) return;
     write(e.getPlayer(), false, false);
   }

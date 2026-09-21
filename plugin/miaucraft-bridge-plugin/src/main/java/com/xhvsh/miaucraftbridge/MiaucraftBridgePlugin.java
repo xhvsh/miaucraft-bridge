@@ -91,14 +91,14 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     Supplier<RemoteConfig> cfg = () -> remoteConfig;
     remoteConfig = RemoteConfig.fromJson(null, overrides);
 
-    presence = new PresenceTracker(sinks, cfg);
+    chat = new ChatBridge(this, sinks, rest, state, cfg, getLogger());
+    presence = new PresenceTracker(sinks, cfg, chat);
     positions = new LivePositionTracker(sinks, rest, cfg, getLogger());
     stats = new StatCollector(sinks, state, cfg, getLogger());
     achievements = new AchievementCollector(sinks, state, cfg, getLogger());
     status = new ServerStatusCollector(sinks, cfg);
     tps = new TpsSampler(sinks, cfg);
     whitelist = new WhitelistSync(this, sinks, rest, state, cfg, getLogger());
-    chat = new ChatBridge(this, sinks, rest, state, cfg, getLogger());
     updater = new Updater(this, remoteUrl);
 
     getServer().getPluginManager().registerEvents(presence, this);
