@@ -254,7 +254,6 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     stats.invalidateSelection();
     if (!firstConfigApplied && cfg.version() > 0) {
       firstConfigApplied = true;
-      chat.notice("Server is online");
       sinks.flushAll();
     }
     rescheduleTasks();
