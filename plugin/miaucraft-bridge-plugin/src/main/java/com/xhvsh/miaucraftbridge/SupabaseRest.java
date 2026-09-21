@@ -31,6 +31,7 @@ public class SupabaseRest {
   private final String schema;
   private final Logger log;
   private final Map<String, Backoff> backoffs = new ConcurrentHashMap<>();
+  private final Map<String, String> lastErrors = new ConcurrentHashMap<>();
 
   public static final class HttpError extends RuntimeException {
     public HttpError(String message) {
@@ -78,6 +79,10 @@ public class SupabaseRest {
 
   public int failures(String sink) {
     return backoffs.getOrDefault(sink, new Backoff(0)).failures;
+  }
+
+  public String lastFailure(String sink) {
+    return lastErrors.get(sink);
   }
 
   public CompletableFuture<JsonArray> select(String sink, String table, String query) {
@@ -138,6 +143,7 @@ public class SupabaseRest {
           int code = res.statusCode();
           if (code >= 300) {
             backoff.fail();
+            lastErrors.put(sink, "HTTP " + code + ": " + abbreviate(res.body()));
             if (backoff.failures == 1) {
               log.warning(sink + " " + method
                   + " failed HTTP " + code + " -> " + abbreviate(res.body()));
@@ -156,6 +162,7 @@ public class SupabaseRest {
         .exceptionally(err -> {
           Throwable cause = err.getCause() != null ? err.getCause() : err;
           backoff.fail();
+          lastErrors.put(sink, "transport: " + cause);
           if (backoff.failures == 1) {
             log.warning(sink + " " + method + " request error: " + cause);
           }

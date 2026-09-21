@@ -326,6 +326,14 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     lines.add("§7last whitelist mirror: §f" + ago(whitelist.lastMirrorMs()));
     lines.add("§7last achievement scan: §f" + ago(achievements.lastScanMs()));
     lines.add("§7last web chat relay: §f" + chat.lastRelayed() + " message(s)");
+    for (String t : List.of("player_achievements", "player_achievement_criteria", "player_stats",
+        "players", "live_positions", "achievements", "achievement_criteria", "server_tps_samples")) {
+      int pend = sinks.pending(t);
+      String err = sinks.lastFailure(t);
+      if (pend == 0 && err == null) continue;
+      lines.add("§7sink " + t + "§7: §f" + pend + " pending"
+          + (err != null ? " §c(last: " + err + ")" : ""));
+    }
     if (updater != null) lines.addAll(updater.statusLines());
     return lines;
   }

@@ -1,6 +1,6 @@
 ﻿{
-    "version":  "2.2.6",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.6.jar",
-    "sha256":  "c9a075ef7e3fbe3dac233de51bf027b616c67ff9af619effc279203dd693c8e4",
-    "notes":  "Fix missed/persistently-empty player achievement progress: progress signatures now live in memory and are re-enqueued on every restart, so previously-poisoned writes self-heal"
+    "version":  "2.2.7",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.7.jar",
+    "sha256":  "7d92d5667b9d554a874a272b6fa7c5a87f61fa6615c4a865ae37a5cf17eaccc9",
+    "notes":  "/bridge status now reports per-table sink pending counts and the last HTTP error (no console logs needed); achievement writes self-heal on every boot"
 }

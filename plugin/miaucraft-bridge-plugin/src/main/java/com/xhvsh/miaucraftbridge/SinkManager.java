@@ -76,6 +76,15 @@ public class SinkManager {
     sinks.values().forEach(BatchSink::resetBatches);
   }
 
+  public int pending(String table) {
+    BatchSink sink = sinks.get(table);
+    return sink == null ? 0 : sink.size();
+  }
+
+  public String lastFailure(String table) {
+    return rest.lastFailure("sink:" + table);
+  }
+
   public static final class BatchSink {
     private final SupabaseRest rest;
     private final String table;
