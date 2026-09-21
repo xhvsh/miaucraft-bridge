@@ -34,22 +34,22 @@ import java.util.logging.Logger;
 public final class AchievementCollector implements Listener {
 
   private final SinkManager sinks;
-  private final PersistedState state;
   private final Supplier<RemoteConfig> config;
   private final Logger log;
 
-  private final JsonObject achievementState;
-  private final JsonObject criterionState;
+  // In-memory only (NOT persisted): remembers this session's last enqueued
+  // state so unchanged progress isn't re-enqueued constantly. Deliberately
+  // re-primed on every boot so a previously-failed/poisoned write always gets
+  // retried after a restart instead of being skipped forever.
+  private final java.util.concurrent.ConcurrentHashMap<String, String> achSig = new java.util.concurrent.ConcurrentHashMap<>();
+  private final java.util.concurrent.ConcurrentHashMap<String, Boolean> critSig = new java.util.concurrent.ConcurrentHashMap<>();
   private final AtomicBoolean scanning = new AtomicBoolean(false);
   private volatile long lastScanMs = 0L;
 
   public AchievementCollector(SinkManager sinks, PersistedState state, Supplier<RemoteConfig> config, Logger log) {
     this.sinks = sinks;
-    this.state = state;
     this.config = config;
     this.log = log;
-    this.achievementState = state.object("achievements");
-    this.criterionState = state.object("achievement-criteria");
   }
 
   public long lastScanMs() {
@@ -171,60 +171,54 @@ public final class AchievementCollector implements Listener {
 
     String signature = completedCount + "/" + total + "/" + done;
     String achKey = playerId + "|" + key;
-    synchronized (state) {
-      JsonElement prev = achievementState.get(achKey);
-      if (prev == null || !prev.getAsString().equals(signature)) {
-        achievementState.addProperty(achKey, signature);
-
-        JsonObject row = new JsonObject();
-        row.addProperty("player_id", playerId);
-        row.addProperty("achievement_key", key);
-        row.addProperty("completed", done);
-        row.addProperty("criteria_done", completedCount);
-        row.addProperty("criteria_total", total);
-        if (done) {
-          Date latestAward = null;
-          for (String criterion : advancement.getCriteria()) {
-            Date awarded = progress.getDateAwarded(criterion);
-            if (awarded != null && (latestAward == null || awarded.after(latestAward))) {
-              latestAward = awarded;
-            }
-          }
-          if (latestAward != null) {
-            row.addProperty("completed_at", latestAward.toInstant().toString());
-          } else {
-            row.add("completed_at", com.google.gson.JsonNull.INSTANCE);
+    if (!achSig.getOrDefault(achKey, "").equals(signature)) {
+      JsonObject row = new JsonObject();
+      row.addProperty("player_id", playerId);
+      row.addProperty("achievement_key", key);
+      row.addProperty("completed", done);
+      row.addProperty("criteria_done", completedCount);
+      row.addProperty("criteria_total", total);
+      if (done) {
+        Date latestAward = null;
+        for (String criterion : advancement.getCriteria()) {
+          Date awarded = progress.getDateAwarded(criterion);
+          if (awarded != null && (latestAward == null || awarded.after(latestAward))) {
+            latestAward = awarded;
           }
         }
-        row.addProperty("updated_at", BridgeUtil.nowIso());
-        sinks.sink("player_achievements", "player_id,achievement_key", true,
-            "player_id", "achievement_key").add(row);
+        if (latestAward != null) {
+          row.addProperty("completed_at", latestAward.toInstant().toString());
+        } else {
+          row.add("completed_at", com.google.gson.JsonNull.INSTANCE);
+        }
       }
+      row.addProperty("updated_at", BridgeUtil.nowIso());
+      sinks.sink("player_achievements", "player_id,achievement_key", true,
+          "player_id", "achievement_key").add(row);
+      achSig.put(achKey, signature);
     }
 
     for (String criterion : advancement.getCriteria()) {
       boolean criterionDone = progress.getAwardedCriteria().contains(criterion);
       String critKey = achKey + "|" + criterion;
-      synchronized (state) {
-        JsonElement prev = criterionState.get(critKey);
-        if (prev != null && prev.isJsonPrimitive() && prev.getAsBoolean() == criterionDone) continue;
-        criterionState.addProperty(critKey, criterionDone);
+      Boolean stored = critSig.get(critKey);
+      if (stored != null && stored.booleanValue() == criterionDone) continue;
 
-        JsonObject row = new JsonObject();
-        row.addProperty("player_id", playerId);
-        row.addProperty("achievement_key", key);
-        row.addProperty("criterion_key", criterion);
-        row.addProperty("done", criterionDone);
-        Date awarded = progress.getDateAwarded(criterion);
-        if (awarded != null) {
-          row.addProperty("awarded_at", awarded.toInstant().toString());
-        } else {
-          row.add("awarded_at", com.google.gson.JsonNull.INSTANCE);
-        }
-        row.addProperty("updated_at", Instant.now().toString());
-        sinks.sink("player_achievement_criteria", "player_id,achievement_key,criterion_key", true,
-            "player_id", "achievement_key", "criterion_key").add(row);
+      JsonObject row = new JsonObject();
+      row.addProperty("player_id", playerId);
+      row.addProperty("achievement_key", key);
+      row.addProperty("criterion_key", criterion);
+      row.addProperty("done", criterionDone);
+      Date awarded = progress.getDateAwarded(criterion);
+      if (awarded != null) {
+        row.addProperty("awarded_at", awarded.toInstant().toString());
+      } else {
+        row.add("awarded_at", com.google.gson.JsonNull.INSTANCE);
       }
+      row.addProperty("updated_at", Instant.now().toString());
+      sinks.sink("player_achievement_criteria", "player_id,achievement_key,criterion_key", true,
+          "player_id", "achievement_key", "criterion_key").add(row);
+      critSig.put(critKey, criterionDone);
     }
   }
 }
