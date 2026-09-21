@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/remote-config.schema.json",
+  "version": 1,
+  "log": {
+    "level": "INFO"
+  },
+  "server": {
+    "name": "Miaucraft"
+  },
+  "status": {
+    "heartbeat-seconds": 25
+  },
+  "collectors": {
+    "presence": {
+      "enabled": true,
+      "heartbeat-seconds": 300,
+      "afk-threshold-seconds": 300
+    },
+    "positions": {
+      "enabled": true,
+      "min-update-seconds": 3,
+      "cleanup-disabled-seconds": 30
+    },
+    "stats": {
+      "enabled": true,
+      "events": true,
+      "reconcile-minutes": 15,
+      "max-batch-size": 300,
+      "categories": {
+        "UNTYPED": ["all"],
+        "MINE_BLOCK": ["all"],
+        "KILL_ENTITY": ["all"],
+        "ENTITY_KILLED_BY": ["all"],
+        "CRAFT_ITEM": ["all"],
+        "USE_ITEM": ["all"],
+        "BREAK_ITEM": ["all"],
+        "PICKUP": ["all"],
+        "DROP": ["all"]
+      },
+      "totals": true
+    },
+    "achievements": {
+      "enabled": true,
+      "catalog-sync": true,
+      "progress-scan-seconds": 30
+    },
+    "status": {
+      "enabled": true
+    },
+    "tps": {
+      "enabled": true,
+      "sample-seconds": 10
+    },
+    "whitelist": {
+      "enabled": true,
+      "mirror-seconds": 120,
+      "command-poll-seconds": 4
+    },
+    "chat": {
+      "enabled": true,
+      "web-poll-seconds": 4,
+      "relay-to-players": true,
+      "web-prefix": "[web] ",
+      "web-prefix-color": "AQUA",
+      "web-body-format": "<{username}> {message}",
+      "web-body-color": "WHITE"
+    },
+    "system-notices": {
+      "enabled": true
+    }
+  }
+}

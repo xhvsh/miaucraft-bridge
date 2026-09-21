@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MiaucraftBridge remote configuration",
+  "description": "Live behavior for the bridge plugin, fetched from GitHub. Edit + push this file to change collector behavior on every server without touching the jar.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "collectors"],
+  "properties": {
+    "version": { "type": "integer", "description": "Config schema version. The plugin refuses to apply a config with a newer version it does not understand." },
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": { "enum": ["DEBUG", "INFO", "WARN", "ERROR"] }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "heartbeat-seconds": { "type": "integer", "minimum": 15, "description": "How often server_status_public.updated_at is refreshed. Must stay well under the website's 30s stale threshold." }
+      }
+    },
+    "collectors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["presence", "positions", "stats", "achievements", "status", "whitelist", "chat"],
+      "properties": {
+        "presence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "heartbeat-seconds": { "type": "integer", "minimum": 30 },
+            "afk-threshold-seconds": { "type": "integer", "minimum": 30 }
+          }
+        },
+        "positions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "min-update-seconds": { "type": "integer", "minimum": 2 },
+            "cleanup-disabled-seconds": { "type": "integer", "minimum": 5 }
+          }
+        },
+        "stats": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "events": { "type": "boolean", "description": "React to in-game stat increments in real time." },
+            "reconcile-minutes": { "type": "integer", "minimum": 1 },
+            "max-batch-size": { "type": "integer", "minimum": 1 },
+            "categories": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Keys to keep for this stat category, or [\"all\"] to keep everything. Adding a new key here collects it without a plugin restart."
+              }
+            },
+            "totals": { "type": "boolean", "description": "Emit derived *_TOTAL aggregate rows." }
+          }
+        },
+        "achievements": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "catalog-sync": { "type": "boolean" },
+            "progress-scan-seconds": { "type": "integer", "minimum": 10 }
+          }
+        },
+        "status": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "whitelist": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "mirror-seconds": { "type": "integer", "minimum": 15 },
+            "command-poll-seconds": { "type": "integer", "minimum": 2 }
+          }
+        },
+        "chat": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "web-poll-seconds": { "type": "integer", "minimum": 2 },
+            "relay-to-players": { "type": "boolean" },
+            "web-prefix": { "type": "string", "description": "Text before each relayed website message. Edit + push to change the format live." },
+            "web-prefix-color": { "type": "string", "description": "Named colour (aqua, dark_gray, ...) or hex (#55ffdd) for web-prefix. Empty = aqua." },
+            "web-body-format": { "type": "string", "description": "Template for the rest of the line. Placeholders: {username}, {message}." },
+            "web-body-color": { "type": "string", "description": "Named colour or hex for the username+message body. Empty = white." }
+          }
+        },
+        "system-notices": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" } }
+        }
+      }
+    }
+  }
+}

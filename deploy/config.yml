@@ -1,0 +1,36 @@
+# MiaucraftBridge config for the PRODUCTION server.
+#
+# Copy this file to plugins/MiaucraftBridge/config.yml on the minecraft server,
+# paste the real service-role-key below, then start/restart the server.
+# Keep the file (and its key) only on the server - never commit it.
+#
+# The plugin writes this file with blank values on first boot and then shuts
+# itself down; replacing it with this file before starting avoids that dance.
+
+supabase:
+  url: "https://qxgpsutkthtuejjrnywg.supabase.co"
+  service-role-key: "PASTE_SERVICE_ROLE_KEY_HERE"
+  schema: "public"
+
+# Live behavior is fetched from the public GitHub config. Push edits to
+# bridge/remote-config.json to reconfigure every running server.
+remote:
+  url: "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/remote-config.json"
+  poll-seconds: 300
+  cache-file: "remote-config-last-good.json"
+
+# Local overrides layered on top of the remote config. Empty = remote as-is.
+overrides: {}
+
+# Master switch - set false to fully disable all DB traffic.
+enabled: true
+
+# Self-updater. Manifest defaults to .../bridge/plugin-update.json (derived
+# from remote.url), so future plugin fixes are installed with /bridge update.
+update:
+  enabled: true
+  manifest-url: ""
+  check-seconds: 300
+  auto-apply: false
+  relaunch: true
+  restart-command: ""

@@ -1,0 +1,46 @@
+# MiaucraftBridge local configuration.
+#
+# This file holds the SECRET project credentials - never commit it to git
+# (it is already covered by .gitignore rules, keep it that way). Everything
+# that controls *behavior* (which collectors run, how often, table names)
+# comes from the remote GitHub config: see remote.url below.
+
+# Supabase project connection. url is not secret; service-role-key IS secret.
+supabase:
+  url: ""
+  service-role-key: ""
+  schema: "public"
+
+# Where the live behavior is fetched from (a public raw GitHub URL).
+# Pushing changes to that file pushes them to every server running the plugin.
+remote:
+  url: "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/remote-config.json"
+  poll-seconds: 300
+  cache-file: "remote-config-last-good.json"
+
+# Local overrides applied ON TOP of the remote config. Same keys as the remote
+# config (e.g. collectors.positions.enabled = false). Empty = use remote as-is.
+overrides: {}
+
+# Master switch - set false to fully disable all DB traffic.
+enabled: true
+
+# Self-updater. Code-level behavior can't come from the remote *behavior*
+# config, so these live here. The plugin downloads a newer jar, replaces its
+# own jar, and relaunches the server (the swap happens after this JVM exits, so
+# the locked jar can be replaced). Default manifest-url is derived from
+# remote.url by swapping the file name to plugin-update.json, so pointing
+# remote.url at a local server also points updates there.
+update:
+  enabled: true
+  # Leave blank to derive from remote.url (…/remote-config.json -> …/plugin-update.json).
+  manifest-url: ""
+  check-seconds: 300
+  # If true, a newer jar is applied (and the server restarted) automatically.
+  auto-apply: false
+  # Relaunch the server after swapping the jar. Safe to leave true: the updater
+  # owns the restart, so it never races your own start script.
+  relaunch: true
+  # Optional: exact command line to run instead of the auto-detected java
+  # command when relaunching, e.g. "java -Xmx2048M -jar paper.jar nogui".
+  restart-command: ""

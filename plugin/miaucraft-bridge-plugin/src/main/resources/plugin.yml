@@ -1,0 +1,19 @@
+name: MiaucraftBridge
+main: com.xhvsh.miaucraftbridge.MiaucraftBridgePlugin
+version: ${project.version}
+api-version: 1.21
+description: Bridges the server to the Miaucraft website (stats, achievements, positions, chat, whitelist, status). Behavior is driven by a remote GitHub config.
+authors: [xhvsh]
+commands:
+  bridge:
+    description: MiaucraftBridge admin commands.
+    usage: /bridge <reload|status|test|stats|update>
+    permission: miaucraftbridge.admin
+  refreshstats:
+    description: Forces a stats reconcile pass.
+    usage: /refreshstats
+    permission: miaucraftbridge.admin
+permissions:
+  miaucraftbridge.admin:
+    description: Allows using MiaucraftBridge admin commands.
+    default: op
