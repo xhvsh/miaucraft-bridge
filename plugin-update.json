@@ -1,6 +1,6 @@
 {
-    "version":  "2.4.0",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.4.0.jar",
-    "sha256":  "6725a61b1232c1deef0be813a0f826a5d35277ccfc628607ea530ec2e96082dd",
-    "notes":  "Revert the biome map collector from the 2.3.x series and rebaseline on the pre-2.3.0 feature set. Version clipped up from 2.2.18 to 2.4.0 (higher than the last published 2.3.2) so the auto-updater treats this as an update rather than a rollback. Removes the /bridge biomes commands, biome scanner, and biome snapshot functions. The updater now reads the manifest via GitHub's Contents API instead of raw.githubusercontent.com, so a push is detected within one check tick (~90s) instead of waiting out the raw edge cache; default update.check-seconds raised to 90 to stay clear of the API rate limit."
+    "version":  "2.4.1",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.4.1.jar",
+    "sha256":  "536820d581e0b5aee78f436f854317344699f8fc8116016372606aecf83e8a54",
+    "notes":  "Bump to 2.4.1: restores the 8-hex sha display in /bridge update status and apply messages for the running, staged, and manifest-provided jars (lost in the biome revert). Continues the biome removal (2.3.x collector gone), the Contents API manifest fetch, and the 90s check cadence. Version nudged above 2.4.0 so the updater stages this build without doubt."
 }

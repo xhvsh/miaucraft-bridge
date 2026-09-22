@@ -82,6 +82,7 @@ public final class Updater {
   private volatile Path stagedJar;
   private volatile String stagedVersion;
   private volatile String lastResult = "never checked";
+  private volatile String lastManifestSha = "";
 
   public Updater(MiaucraftBridgePlugin plugin, String remoteUrl) {
     this.plugin = plugin;
@@ -168,10 +169,11 @@ public final class Updater {
     }
     String url = manifest.get("url").getAsString();
     String sha = manifest.has("sha256") ? manifest.get("sha256").getAsString().trim() : "";
+    this.lastManifestSha = sha;
 
     int cmp = compareVersions(version, currentVersion());
     if (cmp < 0 || (cmp == 0 && currentJarMatches(sha))) {
-      lastResult = "up to date (v" + currentVersion() + ")";
+      lastResult = "up to date (v" + currentVersion() + " · sha " + runningShaShort() + ")";
       return lastResult;
     }
 
@@ -179,7 +181,7 @@ public final class Updater {
     Path dest = updateDir.resolve("miaucraft-bridge-plugin-" + version + ".jar");
     if (Files.exists(dest) && (sha.isBlank() || sha.equalsIgnoreCase(sha256(dest)))) {
       markStaged(dest, version);
-      lastResult = "v" + version + " already staged";
+      lastResult = "v" + version + " already staged (sha " + shortSha(dest) + ")";
       return lastResult;
     }
 
@@ -202,7 +204,7 @@ public final class Updater {
     validateJar(tmp, version);
     Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING);
     markStaged(dest, version);
-    lastResult = "staged v" + version + " (" + Files.size(dest) + " bytes)";
+    lastResult = "staged v" + version + " (" + Files.size(dest) + " bytes · sha " + shortSha(dest) + ")";
     log.info("update " + lastResult + " - run /bridge update apply to install");
     return lastResult;
   }
@@ -270,6 +272,29 @@ public final class Updater {
     return HexFormat.of().formatHex(md.digest());
   }
 
+  /** Short id of the jar currently loaded, so status shows what is really running. */
+  public String runningShaShort() {
+    try {
+      Path jar = plugin.pluginFile().toPath();
+      return jar.toFile().exists() ? shortSha(jar) : "?";
+    } catch (Exception e) {
+      return "?";
+    }
+  }
+
+  private static String shortSha(Path file) {
+    try {
+      return shortSha(sha256(file));
+    } catch (Exception e) {
+      return "?";
+    }
+  }
+
+  private static String shortSha(String full) {
+    full = full.trim();
+    return full.isEmpty() ? "?" : full.substring(0, Math.min(8, full.length()));
+  }
+
   /** Stages are applied here: swap in place when possible, else via the detached helper. */
   public void apply(CommandSender sender) {
     if (!hasStaged()) {
@@ -283,21 +308,22 @@ public final class Updater {
     }
     String version = stagedVersion;
     Path staged = stagedJar;
+    String stagedShaShort = shortSha(staged);
     try {
       if (installInPlace(staged, target)) {
         stagedJar = null;
         stagedVersion = null;
         lastResult = "installed v" + version + " in place";
-        sender.sendMessage("§a[MiaucraftBridge] Installed v" + version
-            + " - the server will restart now.");
+        sender.sendMessage("§a[MiaucraftBridge] Installed v" + version + " (sha " + stagedShaShort
+            + ") - the server will restart now.");
         log.info("update " + lastResult + " (" + target + ").");
         Bukkit.getScheduler().runTask(plugin, Bukkit::shutdown);
         return;
       }
       Path conf = writeConf(target);
       launchHelper(conf);
-      sender.sendMessage("§a[MiaucraftBridge] Installing v" + version
-          + " - the server will restart now.");
+      sender.sendMessage("§a[MiaucraftBridge] Installing v" + version + " (sha " + stagedShaShort
+          + ") - the server will restart now.");
       log.info("Applying update v" + version + " (jar -> " + target + "), restarting.");
       Bukkit.getScheduler().runTask(plugin, Bukkit::shutdown);
     } catch (Exception e) {
@@ -452,11 +478,14 @@ public final class Updater {
   public List<String> statusLines() {
     List<String> lines = new ArrayList<>();
     lines.add("§7updater: §f" + (enabled ? "on" : "off")
-        + " §7(current §f" + currentVersion() + "§7, auto-apply §f" + autoApply + "§7)");
-    lines.add("§7update manifest: §f" + manifestUrl);
+        + " §7(current §f" + currentVersion() + "§7 · sha §f" + runningShaShort()
+        + "§7, auto-apply §f" + autoApply + "§7)");
+    lines.add("§7update manifest: §f" + manifestUrl
+        + (lastManifestSha.isBlank() ? "" : " §7· sha §f" + shortSha(lastManifestSha)));
     lines.add("§7update last check: §f" + lastResult);
     if (hasStaged()) {
-      lines.add("§7staged update: §a" + stagedVersion + " §7(§f" + stagedJar.getFileName() + "§7)");
+      lines.add("§7staged update: §a" + stagedVersion + " §7(§f" + stagedJar.getFileName()
+          + "§7 · sha §f" + shortSha(stagedJar) + "§7)");
     }
     return lines;
   }
