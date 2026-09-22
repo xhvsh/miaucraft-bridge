@@ -358,8 +358,6 @@ public final class AchievementCollector implements Listener {
       if (criteria != null) {
         for (Map.Entry<String, JsonElement> c : criteria.entrySet()) {
           String name = c.getKey();
-          int ns = name.indexOf(':');
-          if (ns >= 0) name = name.substring(ns + 1);
           long ts = readCriterionTimestamp(c.getValue());
           if (ts > 0L) {
             awarded.add(name);
