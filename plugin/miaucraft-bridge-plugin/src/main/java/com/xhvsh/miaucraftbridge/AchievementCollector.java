@@ -286,6 +286,7 @@ public final class AchievementCollector implements Listener {
 
       Map<String, List<String>> critNamesByKey = new HashMap<>();
       Map<String, Integer> totals = new HashMap<>();
+      Map<String, Integer> minByKey = new HashMap<>();
       Iterator<Advancement> it = Bukkit.advancementIterator();
       while (it.hasNext()) {
         Advancement advancement = it.next();
@@ -294,6 +295,7 @@ public final class AchievementCollector implements Listener {
         List<String> names = new java.util.ArrayList<>(advancement.getCriteria());
         critNamesByKey.put(key, names);
         totals.put(key, names.size());
+        minByKey.put(key, minCriteria(advancement));
       }
 
       File[] files = advDir.listFiles();
@@ -313,7 +315,7 @@ public final class AchievementCollector implements Listener {
         org.bukkit.OfflinePlayer player = Bukkit.getOfflinePlayer(uuid);
         if (player.getName() == null) continue;
         try {
-          changed += collectOfflineFile(playerId, file, critNamesByKey, totals);
+          changed += collectOfflineFile(playerId, file, critNamesByKey, totals, minByKey);
           players++;
         } catch (Exception ex) {
           log.log(Level.WARNING, "Offline achievement scan failed for " + playerId, ex);
@@ -330,7 +332,8 @@ public final class AchievementCollector implements Listener {
   }
 
   private int collectOfflineFile(String playerId, File file,
-      Map<String, List<String>> critNamesByKey, Map<String, Integer> totals) throws Exception {
+      Map<String, List<String>> critNamesByKey, Map<String, Integer> totals,
+      Map<String, Integer> minByKey) throws Exception {
     JsonObject root;
     try {
       root = new com.google.gson.JsonParser().parse(Files.readString(file.toPath(), StandardCharsets.UTF_8))
@@ -365,13 +368,19 @@ public final class AchievementCollector implements Listener {
         }
       }
       if (done && awarded.size() < total) {
-        // A completed advancement has every criterion done by definition. The
-        // save file doesn't always carry a per-criterion entry (or any at all,
-        // e.g. root advancements), so fill the rest from the catalog when the
-        // file marks the whole thing done.
-        for (String criterion : criteriaNames) {
-          if (awarded.add(criterion)) {
-            completedAtMs = Math.max(completedAtMs, awardedAt.getOrDefault(criterion, 0L));
+        // A completed all-of advancement has every criterion done by
+        // definition, and the save file sometimes omits criteria the server
+        // didn't record individually (e.g. root advancements), so fill the
+        // rest from the catalog. For any-of advancements the awarded criteria
+        // ARE the truthful state: the rest are alternative paths that were
+        // never taken, so leave them un-awarded.
+        Integer min = minByKey.get(key);
+        boolean allOf = min == null || min >= total;
+        if (allOf) {
+          for (String criterion : criteriaNames) {
+            if (awarded.add(criterion)) {
+              completedAtMs = Math.max(completedAtMs, awardedAt.getOrDefault(criterion, 0L));
+            }
           }
         }
       }
