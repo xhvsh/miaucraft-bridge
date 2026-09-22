@@ -265,6 +265,15 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     }
     rescheduleTasks();
     scheduleUpdateChecks();
+    if (cfg.version() > 0) {
+      // The first-tick catalog sync cannot run (remote config not loaded yet),
+      // so re-publish the catalog whenever a real config is applied.
+      try {
+        achievements.syncCatalog();
+      } catch (Exception ex) {
+        getLogger().log(java.util.logging.Level.WARNING, "Achievement catalog sync failed", ex);
+      }
+    }
   }
 
   // ---------------------------------------------------------------- commands

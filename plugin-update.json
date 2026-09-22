@@ -1,6 +1,6 @@
 {
     "version":  "2.2.14",
     "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.14.jar",
-    "sha256":  "27d46e62cb796baa1f530cbfb695e2b2d6d12003b1f42dac392fbdd3ec3411c3",
+    "sha256":  "8f4b6d4e593f362810e246bcc1cc16ac4d9a25314f8c25d070c5e56c12081c57",
     "notes":  "Achievement catalog hardening: syncCatalog is crash-proof per-advancement, min_criteria (requirement-group count) is best-effort, and /bridge reload re-syncs the catalog. Any-of advancements (e.g. \u0027A Seedy Place\u0027) now publish min_criteria=1 so the site shows 1/1 instead of 1/7."
 }
