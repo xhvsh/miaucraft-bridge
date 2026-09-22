@@ -1057,7 +1057,8 @@ CREATE TABLE public.achievements (
     frame text,
     hidden boolean,
     icon text,
-    total_criteria integer
+    total_criteria integer,
+    min_criteria integer
 );
 
 

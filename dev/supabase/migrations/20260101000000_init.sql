@@ -50,7 +50,8 @@ create table if not exists public.achievements (
   frame          text,
   hidden         boolean not null default false,
   icon           text,
-  total_criteria integer not null default 0
+  total_criteria integer not null default 0,
+  min_criteria   integer
 );
 
 create table if not exists public.achievement_criteria (

@@ -97,6 +97,7 @@ public final class AchievementCollector implements Listener {
         row.add("icon", com.google.gson.JsonNull.INSTANCE);
       }
       row.addProperty("total_criteria", advancement.getCriteria().size());
+      row.addProperty("min_criteria", advancement.getRequirements().getRequirements().size());
       sinks.sink("achievements", "key", true, "key").add(row);
       achievements++;
 
@@ -318,13 +319,28 @@ public final class AchievementCollector implements Listener {
       boolean done = val.has("done") && val.get("done").getAsBoolean();
       long completedAtMs = 0L;
       java.util.Set<String> awarded = new java.util.HashSet<>();
+      java.util.Map<String, Long> awardedAt = new HashMap<>();
       JsonObject criteria = val.has("criteria") ? val.getAsJsonObject("criteria") : null;
       if (criteria != null) {
         for (Map.Entry<String, JsonElement> c : criteria.entrySet()) {
-          JsonElement te = c.getValue();
-          if (te != null && te.isJsonPrimitive() && te.getAsJsonPrimitive().isNumber()) {
+          long ts = readCriterionTimestamp(c.getValue());
+          if (ts > 0L) {
             awarded.add(c.getKey());
-            completedAtMs = Math.max(completedAtMs, te.getAsLong());
+            awardedAt.put(c.getKey(), ts);
+            completedAtMs = Math.max(completedAtMs, ts);
+          } else if (isCriterionTruthy(c.getValue())) {
+            awarded.add(c.getKey());
+          }
+        }
+      }
+      if (done && awarded.size() < total) {
+        // A completed advancement has every criterion done by definition. The
+        // save file doesn't always carry a per-criterion entry (or any at all,
+        // e.g. root advancements), so fill the rest from the catalog when the
+        // file marks the whole thing done.
+        for (String criterion : criteriaNames) {
+          if (awarded.add(criterion)) {
+            completedAtMs = Math.max(completedAtMs, awardedAt.getOrDefault(criterion, 0L));
           }
         }
       }
@@ -361,11 +377,7 @@ public final class AchievementCollector implements Listener {
         row.addProperty("achievement_key", key);
         row.addProperty("criterion_key", criterion);
         row.addProperty("done", criterionDone);
-        long ts = 0L;
-        if (criteria != null && criteria.has(criterion) && criteria.get(criterion).isJsonPrimitive()
-            && criteria.get(criterion).getAsJsonPrimitive().isNumber()) {
-          ts = criteria.get(criterion).getAsLong();
-        }
+        long ts = awardedAt.getOrDefault(criterion, 0L);
         if (criterionDone && ts > 0L) {
           row.addProperty("awarded_at", Instant.ofEpochMilli(ts).toString());
         } else {
@@ -379,5 +391,57 @@ public final class AchievementCollector implements Listener {
       }
     }
     return changed;
+  }
+
+  /** Best-effort timestamp from any plausible criterion value shape seen across
+   *  MC save formats: number, numeric string, or an object with a numeric
+   *  "time"-ish leaf. Returns 0 when no timestamp can be read. */
+  private static long readCriterionTimestamp(JsonElement el) {
+    if (el == null) return 0L;
+    if (el.isJsonPrimitive()) {
+      com.google.gson.JsonPrimitive p = el.getAsJsonPrimitive();
+      if (p.isNumber()) return p.getAsLong();
+      if (p.isString()) {
+        String s = p.getAsString().trim();
+        if (s.isEmpty()) return 0L;
+        try {
+          return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+          return 0L;
+        }
+      }
+      return 0L;
+    }
+    if (el.isJsonObject()) {
+      JsonObject o = el.getAsJsonObject();
+      for (String key : new String[]{"time", "ts", "timestamp", "date", "when"}) {
+        if (o.has(key)) {
+          long ts = readCriterionTimestamp(o.get(key));
+          if (ts > 0L) return ts;
+        }
+      }
+      long max = 0L;
+      for (Map.Entry<String, JsonElement> e : o.entrySet()) {
+        if (e.getValue().isJsonPrimitive() && e.getValue().getAsJsonPrimitive().isNumber()) {
+          max = Math.max(max, e.getValue().getAsLong());
+        }
+      }
+      return max;
+    }
+    return 0L;
+  }
+
+  private static boolean isCriterionTruthy(JsonElement el) {
+    if (el == null) return false;
+    if (el.isJsonPrimitive()) {
+      com.google.gson.JsonPrimitive p = el.getAsJsonPrimitive();
+      if (p.isBoolean()) return p.getAsBoolean();
+      if (p.isNumber()) return p.getAsLong() > 0L;
+      if (p.isString()) {
+        String s = p.getAsString().trim().toLowerCase();
+        return s.equals("true") || s.equals("1") || s.equals("yes");
+      }
+    }
+    return false;
   }
 }
