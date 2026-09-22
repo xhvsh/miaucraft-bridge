@@ -59,6 +59,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private TpsSampler tps;
   private WhitelistSync whitelist;
   private ChatBridge chat;
+  private BiomeScanner biomes;
 
   private volatile boolean firstConfigApplied = false;
 
@@ -99,6 +100,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     status = new ServerStatusCollector(sinks, cfg);
     tps = new TpsSampler(sinks, cfg);
     whitelist = new WhitelistSync(this, sinks, rest, state, cfg, getLogger());
+    biomes = new BiomeScanner(sinks, state, cfg, getLogger());
     updater = new Updater(this, remoteUrl);
 
     getServer().getPluginManager().registerEvents(presence, this);
@@ -203,6 +205,9 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
     long reconcile = Math.max(1, cfg.collectorLong("stats", "reconcile-minutes", 15)) * 60L * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, stats::reconcile, reconcile, reconcile));
+
+    long biomeScan = Math.max(5, cfg.collectorLong("biomes", "scan-seconds", 15)) * 20L;
+    tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, biomes::scan, 200L, biomeScan));
 
     long remotePoll = remotePollSeconds * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::pollRemote, remotePoll, remotePoll));
@@ -312,6 +317,32 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
         () -> sender.sendMessage("§a[MiaucraftBridge] " + msg)));
   }
 
+  public void biomesStatus(CommandSender sender) {
+    biomes.statusLines().forEach(l -> sender.sendMessage("§e[MiaucraftBridge] " + l.substring(2)));
+  }
+
+  public void biomesScanNow(CommandSender sender) {
+    sender.sendMessage("§e[MiaucraftBridge] Queuing a biome scan...");
+    Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+      biomes.scan();
+      sinks.flushAll();
+      Bukkit.getScheduler().runTask(this,
+          () -> sender.sendMessage("§a[MiaucraftBridge] Biome scan done - " + biomes.lastResult()));
+    });
+  }
+
+  public void biomesRescan(CommandSender sender, String dim) {
+    sender.sendMessage("§e[MiaucraftBridge] Resetting biome scan watermark ("
+        + (dim == null || dim.isBlank() ? "all" : dim) + ")...");
+    biomes.rescan(dim);
+    Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+      biomes.scan();
+      sinks.flushAll();
+      Bukkit.getScheduler().runTask(this,
+          () -> sender.sendMessage("§a[MiaucraftBridge] Re-scan finished - " + biomes.lastResult()));
+    });
+  }
+
   public void applyUpdate(CommandSender sender) {
     updater.apply(sender);
   }
@@ -355,8 +386,9 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     lines.add("§7last whitelist mirror: §f" + ago(whitelist.lastMirrorMs()));
     lines.add("§7last achievement scan: §f" + ago(achievements.lastScanMs()));
     lines.add("§7last web chat relay: §f" + chat.lastRelayed() + " message(s)");
+    lines.addAll(biomes.statusLines());
     for (String t : List.of("player_achievements", "player_achievement_criteria", "player_stats",
-        "players", "live_positions", "achievements", "achievement_criteria", "server_tps_samples")) {
+        "players", "live_positions", "achievements", "achievement_criteria", "server_tps_samples", "biomes")) {
       int pend = sinks.pending(t);
       String err = sinks.lastFailure(t);
       if (pend == 0 && err == null) continue;
@@ -410,7 +442,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
   private String collectorSummary(RemoteConfig cfg) {
     StringBuilder sb = new StringBuilder();
-    for (String name : List.of("presence", "positions", "stats", "achievements", "status", "whitelist", "chat")) {
+    for (String name : List.of("presence", "positions", "stats", "achievements", "status", "whitelist", "chat", "biomes")) {
       if (sb.length() > 0) sb.append(", ");
       sb.append(name).append(cfg.collectorEnabled(name) ? "=on" : "=off");
     }

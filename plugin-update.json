@@ -1,6 +1,6 @@
 {
-    "version":  "2.2.18",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.18.jar",
-    "sha256":  "b1038ea305736a6b0a84ac92ce48824ec3bb3a434b15fd9adf3a9220f9c23c97",
-    "notes":  "Fix criterion checkmarks for offline players: Advancement.getCriteria() returns keys exactly as authored (plain for plant_seed, already namespaced like minecraft:badlands for adventuring_time), and the save file uses the same keys - so no namespace stripping (removed the 2.2.17 strip that zeroed per-criterion done flags). Rebuilds per-criterion rows on next scan."
+    "version":  "2.3.0",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.3.0.jar",
+    "sha256":  "174f3045a0a21914a2438163d861e854b0cca059e044129bc9c2c0936d66ff94",
+    "notes":  "Biome map: scan the on-disk region files (region-by-region, center-out from spawn, per-region mtime watermarked in bridge-state.json so rescans are incremental) and mirror each generated chunk's dominant surface biome into the new biomes table for all three dimensions. /bridge biomes status|rescan|now, biomes collector in remote config (scan-seconds, regions-per-scan, max-blocks-radius). Requires the 20260101000300_biomes migration."
 }

@@ -69,6 +69,12 @@
       "web-body-format": "<{username}> {message}",
       "web-body-color": "WHITE"
     },
+    "biomes": {
+      "enabled": true,
+      "scan-seconds": 15,
+      "regions-per-scan": 3,
+      "max-blocks-radius": 0
+    },
     "system-notices": {
       "enabled": true
     }

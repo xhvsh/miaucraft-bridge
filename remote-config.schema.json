@@ -31,7 +31,7 @@
     "collectors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["presence", "positions", "stats", "achievements", "status", "whitelist", "chat"],
+      "required": ["presence", "positions", "stats", "achievements", "status", "whitelist", "chat", "biomes"],
       "properties": {
         "presence": {
           "type": "object",
@@ -110,6 +110,16 @@
           "type": "object",
           "additionalProperties": false,
           "properties": { "enabled": { "type": "boolean" } }
+        },
+        "biomes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "scan-seconds": { "type": "integer", "minimum": 5 },
+            "regions-per-scan": { "type": "integer", "minimum": 1 },
+            "max-blocks-radius": { "type": "integer", "minimum": 0, "description": "Only scan chunks within this many blocks of spawn. 0 = scan everything." }
+          }
         }
       }
     }
