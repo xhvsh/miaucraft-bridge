@@ -1,6 +1,7 @@
 # Publishes a plugin build as the GitHub release artifact.
 #
 #   powershell -File publish-release.ps1 -Version 2.4.3
+#   powershell -File publish-release.ps1 -Version 2.4.3 -SiteRepo C:\path\to\miaucraft
 #
 # Bumps pom.xml to the version, builds, copies the jar to releases/,
 # and writes plugin-update.json pointing at the raw GitHub URL.
@@ -9,9 +10,15 @@
 # exact version (their self-updater checks .../plugin-update.json):
 #   plugin-update.json
 #   releases/miaucraft-bridge-plugin-<version>.jar
+#
+# Pass -SiteRepo to also mirror plugin-update.json + remote-config.json +
+# remote-config.schema.json into that repo's bridge/ (newer servers poll the
+# new repo directly; already-deployed ones must keep polling the old path,
+# so the shim there must be bumped on every release).
 param(
   [Parameter(Mandatory = $true)][string]$Version,
-  [string]$BaseUrl = "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main"
+  [string]$BaseUrl = "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main",
+  [string]$SiteRepo = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -68,3 +75,15 @@ Write-Host ""
 Write-Host "Next: commit and push these paths so servers can fetch it:"
 Write-Host "  plugin-update.json"
 Write-Host "  releases/$name"
+
+if ($SiteRepo -ne "") {
+  $shimDir = Join-Path $SiteRepo "bridge"
+  if (-not (Test-Path -LiteralPath $shimDir)) { throw "Site repo bridge/ not found at $shimDir" }
+  foreach ($f in @("plugin-update.json", "remote-config.json", "remote-config.schema.json")) {
+    Copy-Item -LiteralPath (Join-Path $scriptRoot $f) -Destination (Join-Path $shimDir $f) -Force
+  }
+  Write-Host ""
+  Write-Host "Mirrored the 3 shim files into $shimDir. Commit and push there so"
+  Write-Host "already-deployed servers (which still poll the old repo path) see this update:"
+  Write-Host "  cd $SiteRepo"
+  Write-Host "  git add bridge && git commit -m \"shim v$Version\" && git push"
