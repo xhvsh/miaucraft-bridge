@@ -83,35 +83,66 @@ public final class AchievementCollector implements Listener {
         skipped++;
         continue;
       }
-      String key = advancement.getKey().toString();
-
-      JsonObject row = new JsonObject();
-      row.addProperty("key", key);
-      row.addProperty("title", PlainTextComponentSerializer.plainText().serialize(display.title()));
-      row.addProperty("description", PlainTextComponentSerializer.plainText().serialize(display.description()));
-      row.addProperty("frame", display.frame().name());
-      row.addProperty("hidden", display.isHidden());
-      if (display.icon() != null) {
-        row.addProperty("icon", display.icon().getType().name());
-      } else {
-        row.add("icon", com.google.gson.JsonNull.INSTANCE);
-      }
-      row.addProperty("total_criteria", advancement.getCriteria().size());
-      row.addProperty("min_criteria", advancement.getRequirements().getRequirements().size());
-      sinks.sink("achievements", "key", true, "key").add(row);
-      achievements++;
-
-      for (String criterion : advancement.getCriteria()) {
-        JsonObject crow = new JsonObject();
-        crow.addProperty("achievement_key", key);
-        crow.addProperty("criterion_key", criterion);
-        sinks.sink("achievement_criteria", "achievement_key,criterion_key", true,
-            "achievement_key", "criterion_key").add(crow);
-        criteria++;
+      try {
+        criteria += catalogRow(advancement, display);
+        achievements++;
+      } catch (Exception ex) {
+        skipped++;
+        log.log(Level.WARNING, "Skipping catalog entry " + advancement.getKey(), ex);
       }
     }
     log.info("Achievement catalog: " + achievements + " achievement(s), "
-        + criteria + " criteria (skipped " + skipped + " non-displayable advancement(s)).");
+        + criteria + " criteria (skipped " + skipped + " non-displayable, errored, or any-of advancement(s)).");
+  }
+
+  /** Publishes one catalog row (+ its criteria). Never throws; min_criteria is best-effort. */
+  private int catalogRow(Advancement advancement, AdvancementDisplay display) {
+    String key = advancement.getKey().toString();
+
+    JsonObject row = new JsonObject();
+    row.addProperty("key", key);
+    row.addProperty("title", PlainTextComponentSerializer.plainText().serialize(display.title()));
+    row.addProperty("description", PlainTextComponentSerializer.plainText().serialize(display.description()));
+    row.addProperty("frame", display.frame().name());
+    row.addProperty("hidden", display.isHidden());
+    if (display.icon() != null) {
+      row.addProperty("icon", display.icon().getType().name());
+    } else {
+      row.add("icon", com.google.gson.JsonNull.INSTANCE);
+    }
+    row.addProperty("total_criteria", advancement.getCriteria().size());
+    Integer min = minCriteria(advancement);
+    if (min != null) {
+      row.addProperty("min_criteria", min);
+    } else if (log.isLoggable(Level.FINE)) {
+      log.fine("No min_criteria for " + key + ", web will fall back to total criteria.");
+    }
+    sinks.sink("achievements", "key", true, "key").add(row);
+
+    int added = 0;
+    for (String criterion : advancement.getCriteria()) {
+      JsonObject crow = new JsonObject();
+      crow.addProperty("achievement_key", key);
+      crow.addProperty("criterion_key", criterion);
+      sinks.sink("achievement_criteria", "achievement_key,criterion_key", true,
+          "achievement_key", "criterion_key").add(crow);
+      added++;
+    }
+    return added;
+  }
+
+  /**
+   * Number of requirement groups, i.e. the minimum criteria a player must
+   * satisfy to complete the advancement. For "any of" advancements this is 1.
+   * Returns null when the requirement layout is unavailable on the running
+   * Paper build so the web falls back to total criteria.
+   */
+  private static Integer minCriteria(Advancement advancement) {
+    try {
+      return advancement.getRequirements().getRequirements().size();
+    } catch (Exception ex) {
+      return null;
+    }
   }
 
   // --------------------------------------------------------------- events

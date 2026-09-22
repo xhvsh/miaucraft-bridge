@@ -281,7 +281,20 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
           applyConfig(cfg);
           sender.sendMessage("§a[MiaucraftBridge] Remote config v" + cfg.version()
               + " applied (" + cfg.source() + ").");
+          resyncAchievementsCatalog(sender);
         }));
+  }
+
+  /** Re-publishes the static achievement catalog so schema/code changes land without a reboot. */
+  public void resyncAchievementsCatalog(CommandSender sender) {
+    sender.sendMessage("§e[MiaucraftBridge] Re-syncing achievement catalog...");
+    try {
+      achievements.syncCatalog();
+      sender.sendMessage("§a[MiaucraftBridge] Achievement catalog re-synced.");
+    } catch (Exception ex) {
+      getLogger().log(java.util.logging.Level.WARNING, "Achievement catalog re-sync failed", ex);
+      sender.sendMessage("§c[MiaucraftBridge] Achievement catalog re-sync failed: " + ex);
+    }
   }
 
   public void checkUpdate(CommandSender sender) {
