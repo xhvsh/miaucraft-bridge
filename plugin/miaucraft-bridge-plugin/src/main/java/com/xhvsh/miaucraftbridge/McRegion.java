@@ -88,6 +88,17 @@ final class McRegion {
         return out;
     }
 
+    /** How many chunks this region actually contains on disk (offsets > 0). */
+    int presentChunks() {
+        int n = 0;
+        for (int i = 0; i < CHUNKS; i++) {
+            if (offsets[i] > 0 && counts[i] > 0) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     private byte[] readChunk(RandomAccessFile raf, int index) throws IOException {
         long sector = (long) offsets[index] * 4096L;
         raf.seek(sector);

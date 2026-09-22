@@ -1,6 +1,6 @@
 {
     "version":  "2.3.0",
     "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.3.0.jar",
-    "sha256":  "174f3045a0a21914a2438163d861e854b0cca059e044129bc9c2c0936d66ff94",
-    "notes":  "Biome map: scan the on-disk region files (region-by-region, center-out from spawn, per-region mtime watermarked in bridge-state.json so rescans are incremental) and mirror each generated chunk's dominant surface biome into the new biomes table for all three dimensions. /bridge biomes status|rescan|now, biomes collector in remote config (scan-seconds, regions-per-scan, max-blocks-radius). Requires the 20260101000300_biomes migration."
+    "sha256":  "22b07a6951e073d0a0f735ff94b8789ee0273b9d2d31acb5e4f6e5b2706e3ff8",
+    "notes":  "Biome map: scan the on-disk region files (region-by-region, center-out from spawn, per-region mtime watermarked in bridge-state.json so rescans are incremental) and mirror each generated chunk's dominant surface biome into the new biomes table for all three dimensions. /bridge biomes status|rescan|now, biomes collector in remote config (scan-seconds, regions-per-scan, max-blocks-radius). Requires the 20260101000300_biomes migration. 2.3.0 rev 2: parse the lowercase 'sections' root tag (1.18+ format) and byte-typed section Y used by modern worlds - the first rev parsed 0 chunks on 1.18+ region files; unreadable regions are no longer watermarked so they retry. Run /bridge biomes rescan all once after applying to re-read the regions the first rev wrongly marked as scanned."
 }

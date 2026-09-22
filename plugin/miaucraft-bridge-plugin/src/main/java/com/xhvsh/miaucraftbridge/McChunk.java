@@ -54,7 +54,7 @@ final class McChunk {
                 break;
             }
             String name = n.readString();
-            if (t == McNbt.TAG_LIST && name.equals("Sections")) {
+            if (t == McNbt.TAG_LIST && (name.equals("sections") || name.equals("Sections"))) {
                 sections = readSectionList(n);
             } else if (t == McNbt.TAG_COMPOUND && name.equals("Level")) {
                 List<Section> inner = readSections(n);
@@ -93,8 +93,14 @@ final class McChunk {
                 break;
             }
             String name = n.readString();
-            if (t == McNbt.TAG_INT && name.equals("Y")) {
-                s.y = n.readInt();
+            if (name.equals("Y")) {
+                if (t == McNbt.TAG_BYTE) {
+                    s.y = n.readByte();
+                } else if (t == McNbt.TAG_INT) {
+                    s.y = n.readInt();
+                } else {
+                    n.skip(t);
+                }
             } else if (t == McNbt.TAG_COMPOUND && name.equals("block_states")) {
                 s.hasBlocks = true;
                 n.skip(t);

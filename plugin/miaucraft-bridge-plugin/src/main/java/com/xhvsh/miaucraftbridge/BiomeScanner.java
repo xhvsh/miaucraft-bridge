@@ -81,13 +81,21 @@ public final class BiomeScanner {
         try {
           McRegion region = McRegion.open(sf.file);
           List<McRegion.ChunkRecord> rows = region.scan();
+          int present = region.presentChunks();
           int added = upsert(rows, dim, maxRadius);
           done++;
           sessionRegions++;
           sessionChunks += rows.size();
-          markScanned(dim, sf.file, sf.lastModified);
+          if (present > 0 && rows.isEmpty()) {
+            // Region has chunks but nothing was extracted (e.g. legacy format
+            // or an odd chunk layout) - do NOT watermark it, so it retries
+            // next pass instead of being permanently skipped.
+            lastResult = dim + ": " + present + " chunk(s) unreadable in " + sf.file.getName();
+          } else {
+            markScanned(dim, sf.file, sf.lastModified);
           lastResult = dim + ": " + rows.size() + " chunk(s) from " + sf.file.getName()
-              + (added > 0 ? "" : " (unchanged)");
+              + (added > 0 ? "" : present == 0 ? " (empty)" : " (unchanged)");
+          }
         } catch (Exception ex) {
           log.log(Level.WARNING, "Biome scan failed for region " + sf.file, ex);
         }
