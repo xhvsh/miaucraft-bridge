@@ -1,6 +1,6 @@
 {
-    "version":  "2.2.16",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.16.jar",
-    "sha256":  "410ecac95a57a5fd17bf15807d1f01312732a476425e9459be5bcebb546f0f09",
-    "notes":  "TEMP diagnostic: offline scan ships ONE raw advancement-entry JSON (chat system message tagged [bridge-diag]) whenever it can\u0027t decode any criteria, to identify the real save-file format. No behavior change otherwise."
+    "version":  "2.2.17",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.17.jar",
+    "sha256":  "870a3a757dd01ceb2c826bcf96936865651974a8cef2ed3445b3e653c72e4ab9",
+    "notes":  "Fix offline advancement scan: criterion keys often arrive namespaced (minecraft:biome) and values are datetime strings (YYYY-MM-dd HH:mm:ss +ZZZZ) - parse both. Removed diagnostic. Update checker now cache-busts raw.githubusercontent URLs so freshly pushed manifests/jars are seen within one check interval (45s) instead of several minutes."
 }

@@ -52,7 +52,6 @@ public final class AchievementCollector implements Listener {
   private final java.util.concurrent.ConcurrentHashMap<String, Boolean> critSig = new java.util.concurrent.ConcurrentHashMap<>();
   private final AtomicBoolean scanning = new AtomicBoolean(false);
   private volatile long lastScanMs = 0L;
-  private volatile boolean diagCaptured = false;
 
   public AchievementCollector(SinkManager sinks, PersistedState state, Supplier<RemoteConfig> config, Logger log) {
     this.sinks = sinks;
@@ -279,7 +278,6 @@ public final class AchievementCollector implements Listener {
     if (!cfg.collectorEnabled("achievements")) return;
     if (!scanning.compareAndSet(false, true)) return;
     try {
-      diagCaptured = false;
       File worldFolder = Bukkit.getWorlds().stream().findFirst()
           .map(w -> w.getWorldFolder()).orElse(null);
       if (worldFolder == null) return;
@@ -359,29 +357,18 @@ public final class AchievementCollector implements Listener {
       JsonObject criteria = val.has("criteria") ? val.getAsJsonObject("criteria") : null;
       if (criteria != null) {
         for (Map.Entry<String, JsonElement> c : criteria.entrySet()) {
+          String name = c.getKey();
+          int ns = name.indexOf(':');
+          if (ns >= 0) name = name.substring(ns + 1);
           long ts = readCriterionTimestamp(c.getValue());
           if (ts > 0L) {
-            awarded.add(c.getKey());
-            awardedAt.put(c.getKey(), ts);
+            awarded.add(name);
+            awardedAt.put(name, ts);
             completedAtMs = Math.max(completedAtMs, ts);
           } else if (isCriterionTruthy(c.getValue())) {
-            awarded.add(c.getKey());
+            awarded.add(name);
           }
         }
-      }
-      // TEMP diagnostic: if the save entry carried criteria we could not
-      // interpret, snapshot the whole raw entry to chat so the real file
-      // format can be inspected (one row per scan run).
-      if (awarded.isEmpty() && !diagCaptured && (criteria == null || !criteria.isEmpty())) {
-        diagCaptured = true;
-        String raw = val.toString();
-        if (raw.length() > 1200) raw = raw.substring(0, 1200);
-        JsonObject d = new JsonObject();
-        d.addProperty("kind", "system");
-        d.addProperty("username", playerId);
-        d.addProperty("message", "[bridge-diag] key=" + key + " done=" + done
-            + " total=" + total + " raw=" + raw);
-        sinks.sink("chat_messages", "id", false, "id").add(d);
       }
       if (done && awarded.size() < total) {
         // A completed all-of advancement has every criterion done by
@@ -462,9 +449,18 @@ public final class AchievementCollector implements Listener {
         if (s.isEmpty()) return 0L;
         try {
           return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-          return 0L;
+        } catch (NumberFormatException ignored) {
+          // fall through to datetime shapes
         }
+        for (String pat : new String[]{"yyyy-MM-dd HH:mm:ss Z", "yyyy-MM-dd HH:mm:ss z",
+            "yyyy-MM-dd HH:mm:ss.SSS Z", "yyyy-MM-dd HH:mm:ss"}) {
+          try {
+            return new java.text.SimpleDateFormat(pat).parse(s).getTime();
+          } catch (Exception ignored) {
+            // try the next pattern
+          }
+        }
+        return 0L;
       }
       return 0L;
     }

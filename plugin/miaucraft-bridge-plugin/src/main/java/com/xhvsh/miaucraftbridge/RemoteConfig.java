@@ -55,10 +55,15 @@ public final class RemoteConfig {
    * Fetches the remote config. On any failure falls back to the last-good
    * cached copy, then to an empty config (collectors stay disabled).
    */
+  private static String bust(String url) {
+    String t = String.valueOf(System.currentTimeMillis());
+    return url.indexOf('?') >= 0 ? url + "&t=" + t : url + "?t=" + t;
+  }
+
   public static CompletableFuture<RemoteConfig> fetch(String url, JsonObject overrides, Path cacheFile, Logger log) {
     HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     HttpRequest req = HttpRequest.newBuilder()
-        .uri(URI.create(url))
+        .uri(URI.create(bust(url)))
         .timeout(Duration.ofSeconds(15))
         .header("User-Agent", "MiaucraftBridge/2.0")
         .GET()

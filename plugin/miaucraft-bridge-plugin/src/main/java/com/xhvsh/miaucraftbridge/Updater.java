@@ -103,13 +103,21 @@ public final class Updater {
     return plugin.getDescription().getVersion();
   }
 
+  /** raw.githubusercontent.com caches files for a few minutes; a fresh query
+   *  param forces a cache miss so a freshly deployed manifest/jar is seen
+   *  within one check tick instead of minutes later. */
+  private static String bust(String url) {
+    String t = String.valueOf(System.currentTimeMillis());
+    return url.indexOf('?') >= 0 ? url + "&t=" + t : url + "?t=" + t;
+  }
+
   /** Fetches the manifest and stages a newer jar if one exists. Never throws. */
   public CompletableFuture<String> check() {
     if (!enabled) {
       return CompletableFuture.completedFuture("updater disabled");
     }
     HttpRequest req = HttpRequest.newBuilder()
-        .uri(URI.create(manifestUrl))
+        .uri(URI.create(bust(manifestUrl)))
         .timeout(Duration.ofSeconds(20))
         .header("User-Agent", "MiaucraftBridge/" + currentVersion())
         .GET()
@@ -158,7 +166,7 @@ public final class Updater {
 
     Path tmp = updateDir.resolve("download.tmp");
     HttpRequest req = HttpRequest.newBuilder()
-        .uri(URI.create(url))
+        .uri(URI.create(bust(url)))
         .timeout(Duration.ofMinutes(2))
         .header("User-Agent", "MiaucraftBridge/" + currentVersion())
         .GET()
