@@ -1,6 +1,6 @@
 {
-    "version":  "2.2.15",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.15.jar",
-    "sha256":  "b7bafbe05cd48e7c721e800a6a614d8f3aa05b08a91f4d9aa2a1d898e9d61422",
-    "notes":  "Offline scan no longer inflates any-of achievements: previously a completed \u0027any of\u0027 (e.g. A Seedy Place, min=1) marked ALL criteria as done (7/7, all checklist ticks). Now only criteria actually recorded in the player\u0027s advancement file count, matching the online scan. All-of/layouts unchanged."
+    "version":  "2.2.16",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.16.jar",
+    "sha256":  "410ecac95a57a5fd17bf15807d1f01312732a476425e9459be5bcebb546f0f09",
+    "notes":  "TEMP diagnostic: offline scan ships ONE raw advancement-entry JSON (chat system message tagged [bridge-diag]) whenever it can\u0027t decode any criteria, to identify the real save-file format. No behavior change otherwise."
 }

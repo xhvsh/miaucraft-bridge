@@ -52,6 +52,7 @@ public final class AchievementCollector implements Listener {
   private final java.util.concurrent.ConcurrentHashMap<String, Boolean> critSig = new java.util.concurrent.ConcurrentHashMap<>();
   private final AtomicBoolean scanning = new AtomicBoolean(false);
   private volatile long lastScanMs = 0L;
+  private volatile boolean diagCaptured = false;
 
   public AchievementCollector(SinkManager sinks, PersistedState state, Supplier<RemoteConfig> config, Logger log) {
     this.sinks = sinks;
@@ -278,6 +279,7 @@ public final class AchievementCollector implements Listener {
     if (!cfg.collectorEnabled("achievements")) return;
     if (!scanning.compareAndSet(false, true)) return;
     try {
+      diagCaptured = false;
       File worldFolder = Bukkit.getWorlds().stream().findFirst()
           .map(w -> w.getWorldFolder()).orElse(null);
       if (worldFolder == null) return;
@@ -366,6 +368,20 @@ public final class AchievementCollector implements Listener {
             awarded.add(c.getKey());
           }
         }
+      }
+      // TEMP diagnostic: if the save entry carried criteria we could not
+      // interpret, snapshot the whole raw entry to chat so the real file
+      // format can be inspected (one row per scan run).
+      if (awarded.isEmpty() && !diagCaptured && (criteria == null || !criteria.isEmpty())) {
+        diagCaptured = true;
+        String raw = val.toString();
+        if (raw.length() > 1200) raw = raw.substring(0, 1200);
+        JsonObject d = new JsonObject();
+        d.addProperty("kind", "system");
+        d.addProperty("username", playerId);
+        d.addProperty("message", "[bridge-diag] key=" + key + " done=" + done
+            + " total=" + total + " raw=" + raw);
+        sinks.sink("chat_messages", "id", false, "id").add(d);
       }
       if (done && awarded.size() < total) {
         // A completed all-of advancement has every criterion done by
