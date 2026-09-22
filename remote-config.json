@@ -8,7 +8,7 @@
     "name": "Miaucraft"
   },
   "update": {
-    "check-seconds": 45
+    "check-seconds": 90
   },
   "status": {
     "heartbeat-seconds": 8

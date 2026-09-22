@@ -30,7 +30,7 @@ enabled: true
 update:
   enabled: true
   manifest-url: ""
-  check-seconds: 300
+  check-seconds: 90
   auto-apply: false
   relaunch: true
   restart-command: ""

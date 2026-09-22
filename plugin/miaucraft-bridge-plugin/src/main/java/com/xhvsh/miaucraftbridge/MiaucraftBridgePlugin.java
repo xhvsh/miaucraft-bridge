@@ -228,8 +228,8 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     }
     if (updater == null || !updater.isEnabled()) return;
     RemoteConfig cfg = remoteConfig;
-    long periodSecs = cfg != null ? cfg.longVal("update.check-seconds", 45)
-        : getConfig().getLong("update.check-seconds", 45);
+    long periodSecs = cfg != null ? cfg.longVal("update.check-seconds", 90)
+        : getConfig().getLong("update.check-seconds", 90);
     long period = Math.max(20, periodSecs) * 20L;
     updateTask = Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::updateTick, 200L, period);
   }

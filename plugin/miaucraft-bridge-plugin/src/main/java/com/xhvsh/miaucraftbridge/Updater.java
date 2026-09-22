@@ -46,8 +46,27 @@ import java.util.zip.ZipFile;
  */
 public final class Updater {
 
+  /** $schema links and the data URL have moved to the gh-cdn aware github.com URLs, so
+   *  the manifest is read through the Contents API instead: raw.githubusercontent.com
+   *  serves a fixed manifest URL from an edge cache that lags a push by minutes. */
   private static final String DEFAULT_MANIFEST =
-      "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/plugin-update.json";
+      "https://api.github.com/repos/xhvsh/miaucraft/contents/bridge/plugin-update.json?ref=main";
+
+  /** Rewrites a raw.githubusercontent.com URL into the always-fresh Contents API form
+   *  (bare contents URLs are passed through untouched). */
+  private static String manifestApi(String url) {
+    String raw = "https://raw.githubusercontent.com/";
+    if (url != null && url.startsWith(raw)) {
+      String path = URI.create(url).getPath();
+      String[] parts = path.split("/");
+      if (parts.length >= 4) {
+        String prefix = "/" + parts[1] + "/" + parts[2] + "/" + parts[3] + "/";
+        return "https://api.github.com/repos/" + parts[1] + "/" + parts[2]
+            + "/contents/" + path.substring(prefix.length()) + "?ref=" + parts[3];
+      }
+    }
+    return url;
+  }
 
   private final MiaucraftBridgePlugin plugin;
   private final Logger log;
@@ -104,8 +123,7 @@ public final class Updater {
   }
 
   /** raw.githubusercontent.com caches files for a few minutes; a fresh query
-   *  param forces a cache miss so a freshly deployed manifest/jar is seen
-   *  within one check tick instead of minutes later. */
+   *  param forces a cache miss so a freshly deployed jar is seen immediately. */
   private static String bust(String url) {
     String t = String.valueOf(System.currentTimeMillis());
     return url.indexOf('?') >= 0 ? url + "&t=" + t : url + "?t=" + t;
@@ -117,9 +135,10 @@ public final class Updater {
       return CompletableFuture.completedFuture("updater disabled");
     }
     HttpRequest req = HttpRequest.newBuilder()
-        .uri(URI.create(bust(manifestUrl)))
+        .uri(URI.create(manifestApi(manifestUrl)))
         .timeout(Duration.ofSeconds(20))
         .header("User-Agent", "MiaucraftBridge/" + currentVersion())
+        .header("Accept", "application/vnd.github.raw+json")
         .GET()
         .build();
     return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())

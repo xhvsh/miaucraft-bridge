@@ -35,7 +35,7 @@ update:
   enabled: true
   # Leave blank to derive from remote.url (…/remote-config.json -> …/plugin-update.json).
   manifest-url: ""
-  check-seconds: 300
+  check-seconds: 90
   # If true, a newer jar is applied (and the server restarted) automatically.
   auto-apply: false
   # Relaunch the server after swapping the jar. Safe to leave true: the updater
