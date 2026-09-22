@@ -1,6 +1,6 @@
 {
-    "version":  "2.3.1",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.3.1.jar",
-    "sha256":  "02970516564d343f9e0d2bf996b19cc4fedc54d6f7394ee6f526969157f650c1",
-    "notes":  "2.3.1: biome scans are command-only and scan the WHOLE world in one go. The background timer is gone - run /bridge biomes rescan all (or now) to fill the map; a rescan covers every region file, so the map shows all generated chunks, not just the few nearest spawn. The old regions-per-scan budget limited every command (even 'rescan all') to ~3 regions total, which is why only a handful of sections near spawn ever loaded - it's removed. scan-seconds and regions-per-scan are dropped from the biomes remote config. Includes the hollow-chunk fix (top biome layer + single-entry palettes with no data array). After updating, run /bridge biomes rescan all once. Requires the 20260101000300_biomes migration and the 20260101000500_biomes_snapshot RPC for the website."
+    "version":  "2.3.2",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.3.2.jar",
+    "sha256":  "44820f3a51d2e3a3d58b1739aadbbf1fb959850a23f363134f1beed2e957a63d",
+    "notes":  "2.3.2: every published build now has its own unique version, so the jar name ALWAYS changes when the file changes. /bridge status shows both the running version AND the running jar's sha, and /bridge update prints sha's too - if the sha next to 'current' does not match the sha in this manifest, you are NOT running this build. Apply mechanics unchanged: /bridge update apply installs the new jar and the server restarts; the restart (not the updater) is what takes the couple of minutes. From 2.3.1: biome scans are command-only and scan the WHOLE world in one go (background timer removed) - run /bridge biomes rescan all once after updating. Includes the hollow-chunk fix (top biome layer + single-entry palettes with no data array). Requires the 20260101000300_biomes migration and the 20260101000500_biomes_snapshot RPC."
 }
