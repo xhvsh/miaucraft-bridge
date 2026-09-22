@@ -7,7 +7,8 @@ import java.util.Map;
 
 final class McChunk {
     private static final int BIOME_GRID = 4;
-    private static final int SURFACE_OFFSET = 12;
+    // Top biome layer of a section (y layer 3): entries 48..63 = (3*4 + z)*4 + x.
+    private static final int SURFACE_OFFSET = 48;
 
     private McChunk() {
     }
@@ -34,13 +35,17 @@ final class McChunk {
         if (sections == null || sections.isEmpty()) {
             return null;
         }
+        // Highest section that actually carries a biome palette. A section can
+        // have blocks yet omit biomes (or store a single-entry palette with no
+        // data array), so keep descending until one is found rather than
+        // settling for null and leaving the chunk hollow.
         Section top = null;
         for (Section s : sections) {
-            if (s.hasBlocks && (top == null || s.y > top.y)) {
+            if (s.palette != null && !s.palette.isEmpty() && (top == null || s.y > top.y)) {
                 top = s;
             }
         }
-        if (top == null || top.palette == null || top.palette.isEmpty() || top.data == null || top.data.length == 0) {
+        if (top == null) {
             return null;
         }
         return dominant(top);
@@ -175,6 +180,10 @@ final class McChunk {
     }
 
     private static String dominant(Section s) {
+        // A single-entry palette saves no data array - every index is 0.
+        if (s.data == null || s.data.length == 0) {
+            return s.palette.size() == 1 ? s.palette.get(0) : null;
+        }
         int size = s.palette.size();
         int bits = 64 - Long.numberOfLeadingZeros(size - 1);
         if (bits < 1) {

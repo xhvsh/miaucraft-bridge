@@ -1,6 +1,6 @@
 {
-    "version":  "2.3.0",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.3.0.jar",
-    "sha256":  "22b07a6951e073d0a0f735ff94b8789ee0273b9d2d31acb5e4f6e5b2706e3ff8",
-    "notes":  "Biome map: scan the on-disk region files (region-by-region, center-out from spawn, per-region mtime watermarked in bridge-state.json so rescans are incremental) and mirror each generated chunk's dominant surface biome into the new biomes table for all three dimensions. /bridge biomes status|rescan|now, biomes collector in remote config (scan-seconds, regions-per-scan, max-blocks-radius). Requires the 20260101000300_biomes migration. 2.3.0 rev 2: parse the lowercase 'sections' root tag (1.18+ format) and byte-typed section Y used by modern worlds - the first rev parsed 0 chunks on 1.18+ region files; unreadable regions are no longer watermarked so they retry. Run /bridge biomes rescan all once after applying to re-read the regions the first rev wrongly marked as scanned."
+    "version":  "2.3.1",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.3.1.jar",
+    "sha256":  "16728dc4d5a5fe12b306719aaa237aa1874228a8ad193fc866d7ca45f6cdbb5d",
+    "notes":  "2.3.1: biome scans are now command-only. The background timer that scanned region files every scan-seconds is removed - the map only updates when /bridge biomes rescan all (or rescan <dim>/now) is run. scan-seconds was dropped from the biomes remote config. 2.3.0 rev 3 (included): read the top biome layer of the highest section properly and accept single-biome sections that omit the data array, so chunks no longer come back hollow. rev 2 (included): parse the lowercase 'sections' root tag and byte-typed section Y (1.18+ format) - the first rev parsed 0 chunks on modern region files. After updating, run /bridge biomes rescan all once to (re)fill the map. Requires the 20260101000300_biomes migration (and the 20260101000500_biomes_snapshot RPC for the website)."
 }

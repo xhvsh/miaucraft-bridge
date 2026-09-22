@@ -71,7 +71,6 @@
     },
     "biomes": {
       "enabled": true,
-      "scan-seconds": 15,
       "regions-per-scan": 3,
       "max-blocks-radius": 0
     },

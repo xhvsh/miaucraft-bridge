@@ -206,8 +206,8 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     long reconcile = Math.max(1, cfg.collectorLong("stats", "reconcile-minutes", 15)) * 60L * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, stats::reconcile, reconcile, reconcile));
 
-    long biomeScan = Math.max(5, cfg.collectorLong("biomes", "scan-seconds", 15)) * 20L;
-    tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, biomes::scan, 200L, biomeScan));
+    // Biomes are scanned on demand only ("/bridge biomes rescan|now"); no
+    // background timer, so the disk/DB work never happens unless a player runs it.
 
     long remotePoll = remotePollSeconds * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::pollRemote, remotePoll, remotePoll));

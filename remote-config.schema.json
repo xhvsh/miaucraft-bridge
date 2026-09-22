@@ -116,7 +116,6 @@
           "additionalProperties": false,
           "properties": {
             "enabled": { "type": "boolean" },
-            "scan-seconds": { "type": "integer", "minimum": 5 },
             "regions-per-scan": { "type": "integer", "minimum": 1 },
             "max-blocks-radius": { "type": "integer", "minimum": 0, "description": "Only scan chunks within this many blocks of spawn. 0 = scan everything." }
           }
