@@ -44,15 +44,16 @@ public final class BiomeScanner {
     this.log = log;
   }
 
-  /** Async-friendly: guard once, run one budgeted pass. Never blocks callers. */
+  /** Async-friendly: guard once, run one full pass over every region file.
+   *  Runs on the async worker the caller schedules - the only throttle is the
+   *  mtime watermark, so unchanged regions are skipped, not re-read. */
   public void scan() {
     RemoteConfig cfg = config.get();
     if (!cfg.collectorEnabled("biomes")) return;
     if (!scanning.compareAndSet(false, true)) return;
     try {
-      int budget = Math.max(1, cfg.collectorInt("biomes", "regions-per-scan", 3));
       long maxRadius = Math.max(0, cfg.collectorLong("biomes", "max-blocks-radius", 0));
-      scanOnePass(budget, maxRadius);
+      scanOnePass(Integer.MAX_VALUE, maxRadius);
       lastScanMs = System.currentTimeMillis();
     } catch (Exception ex) {
       log.log(Level.WARNING, "Biome scan failed", ex);
