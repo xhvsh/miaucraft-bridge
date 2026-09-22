@@ -1,6 +1,6 @@
 {
-    "version":  "2.4.1",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.4.1.jar",
-    "sha256":  "536820d581e0b5aee78f436f854317344699f8fc8116016372606aecf83e8a54",
-    "notes":  "Bump to 2.4.1: restores the 8-hex sha display in /bridge update status and apply messages for the running, staged, and manifest-provided jars (lost in the biome revert). Continues the biome removal (2.3.x collector gone), the Contents API manifest fetch, and the 90s check cadence. Version nudged above 2.4.0 so the updater stages this build without doubt."
+    "version":  "2.4.2",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.4.2.jar",
+    "sha256":  "4807aa45a62e0a17a358a08a5590d6d16cd92e25835b607477d1d3d88f29c11a",
+    "notes":  "Fix AFK flag lag: the afk column was only refreshed on the ~5 minute presence heartbeat, so a player who moved again still showed as AFK for up to that long. Now a move clears the AFK flag immediately (write on the AFK->active transition), and heartbeats only write when the state actually changes."
 }

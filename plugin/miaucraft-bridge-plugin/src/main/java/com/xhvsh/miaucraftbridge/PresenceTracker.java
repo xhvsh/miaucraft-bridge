@@ -27,6 +27,7 @@ public final class PresenceTracker implements Listener {
   private final ChatBridge chat;
   private final Map<UUID, Long> lastHeartbeat = new ConcurrentHashMap<>();
   private final Map<UUID, Long> lastMoved = new ConcurrentHashMap<>();
+  private final Map<UUID, Boolean> afkWritten = new ConcurrentHashMap<>();
 
   public PresenceTracker(SinkManager sinks, Supplier<RemoteConfig> config, ChatBridge chat) {
     this.sinks = sinks;
@@ -43,6 +44,7 @@ public final class PresenceTracker implements Listener {
     lastMoved.put(e.getPlayer().getUniqueId(), System.currentTimeMillis());
     chat.notice(e.getPlayer().getName() + " joined the game");
     if (!enabled()) return;
+    afkWritten.put(e.getPlayer().getUniqueId(), false);
     write(e.getPlayer(), true, false);
   }
 
@@ -50,6 +52,7 @@ public final class PresenceTracker implements Listener {
   public void onQuit(PlayerQuitEvent e) {
     lastHeartbeat.remove(e.getPlayer().getUniqueId());
     lastMoved.remove(e.getPlayer().getUniqueId());
+    afkWritten.remove(e.getPlayer().getUniqueId());
     chat.notice(e.getPlayer().getName() + " left the game");
     if (!enabled()) return;
     write(e.getPlayer(), false, false);
@@ -57,7 +60,12 @@ public final class PresenceTracker implements Listener {
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onMove(PlayerMoveEvent e) {
-    lastMoved.put(e.getPlayer().getUniqueId(), System.currentTimeMillis());
+    Player p = e.getPlayer();
+    lastMoved.put(p.getUniqueId(), System.currentTimeMillis());
+    if (Boolean.TRUE.equals(afkWritten.get(p.getUniqueId()))) {
+      write(p, true, false);
+      afkWritten.put(p.getUniqueId(), false);
+    }
   }
 
   private void write(Player p, boolean online, boolean afk) {
@@ -85,7 +93,10 @@ public final class PresenceTracker implements Listener {
       lastHeartbeat.put(uid, now);
       Long moved = lastMoved.get(uid);
       boolean afk = moved != null && now - moved > afkThresholdMs;
-      write(p, true, afk);
+      Boolean written = afkWritten.put(uid, afk);
+      if (written == null || written != afk) {
+        write(p, true, afk);
+      }
     }
   }
 
@@ -95,6 +106,7 @@ public final class PresenceTracker implements Listener {
     for (Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
       lastMoved.put(p.getUniqueId(), now);
       lastHeartbeat.put(p.getUniqueId(), now - 61_000L);
+      afkWritten.put(p.getUniqueId(), false);
       write(p, true, false);
     }
   }
