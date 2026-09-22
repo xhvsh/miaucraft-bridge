@@ -1,6 +1,6 @@
 ﻿{
-    "version":  "2.2.12",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.12.jar",
-    "sha256":  "1be2d216f7c029b26ef679d81bd5eea9d73e5129f0e7603f8fb929b6c44aea6b",
-    "notes":  "Catalog now publishes min_criteria (number of requirement groups) so any-of achievements like 'Fishy Business' / 'Seedy Place' show 0/1 or 1/1 instead of 0/4. Requires adding a min_criteria column to achievements: ALTER TABLE public.achievements ADD COLUMN IF NOT EXISTS min_criteria integer; (plugin fills it on boot)"
+    "version":  "2.2.13",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.2.13.jar",
+    "sha256":  "92c89572f661948811419cd74fd64fc6c05d7e1c9c043b0f432767981dbd790d",
+    "notes":  "Faster update polling: update.check-seconds now comes from the GitHub remote config (default 45s, floor 20s) instead of the local config.yml (was 300s), so server picks up new jars ~1 minute after push instead of ~5"
 }

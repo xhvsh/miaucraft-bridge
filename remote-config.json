@@ -7,6 +7,9 @@
   "server": {
     "name": "Miaucraft"
   },
+  "update": {
+    "check-seconds": 45
+  },
   "status": {
     "heartbeat-seconds": 8
   },
