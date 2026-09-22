@@ -1,4 +1,4 @@
-# Downloads a Paper server into bridge/dev/server and prepares it for local
+# Downloads a Paper server into dev/server and prepares it for local
 # testing of the bridge plugin. Safe to re-run.
 param(
   [string]$MinecraftVersion = "1.21.11",

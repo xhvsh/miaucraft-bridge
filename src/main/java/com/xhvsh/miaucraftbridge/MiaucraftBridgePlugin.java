@@ -32,7 +32,7 @@ import java.util.function.Supplier;
 public final class MiaucraftBridgePlugin extends JavaPlugin {
 
   private static final String DEFAULT_REMOTE_URL =
-      "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/remote-config.json";
+      "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/remote-config.json";
 
   private final List<BukkitTask> tasks = new ArrayList<>();
   private final Gson gson = new Gson();

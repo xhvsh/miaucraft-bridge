@@ -1,17 +1,17 @@
 # Publishes a plugin build as the GitHub release artifact.
 #
-#   powershell -File bridge/publish-release.ps1 -Version 2.2.0
+#   powershell -File publish-release.ps1 -Version 2.4.3
 #
-# Bumps pom.xml to the version, builds, copies the jar to bridge/releases/,
-# and writes bridge/plugin-update.json pointing at the raw GitHub URL.
+# Bumps pom.xml to the version, builds, copies the jar to releases/,
+# and writes plugin-update.json pointing at the raw GitHub URL.
 #
 # Commit and push these paths afterwards so deployed servers can fetch this
-# exact version (their self-updater checks .../bridge/plugin-update.json):
-#   bridge/plugin-update.json
-#   bridge/releases/miaucraft-bridge-plugin-<version>.jar
+# exact version (their self-updater checks .../plugin-update.json):
+#   plugin-update.json
+#   releases/miaucraft-bridge-plugin-<version>.jar
 param(
   [Parameter(Mandatory = $true)][string]$Version,
-  [string]$BaseUrl = "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge"
+  [string]$BaseUrl = "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main"
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +24,7 @@ function WriteNoBom([string]$Path, [string]$Text) {
 }
 
 $scriptRoot = $PSScriptRoot
-$pluginRoot = (Resolve-Path (Join-Path $scriptRoot "plugin\miaucraft-bridge-plugin")).Path
+$pluginRoot = $scriptRoot
 $pom = Join-Path $pluginRoot "pom.xml"
 
 $pomText = Get-Content -LiteralPath $pom -Raw
@@ -66,5 +66,5 @@ Write-Host "Released $name ($sha)"
 Write-Host "Manifest: $(Join-Path $scriptRoot 'plugin-update.json')"
 Write-Host ""
 Write-Host "Next: commit and push these paths so servers can fetch it:"
-Write-Host "  bridge/plugin-update.json"
-Write-Host "  bridge/releases/$name"
+Write-Host "  plugin-update.json"
+Write-Host "  releases/$name"

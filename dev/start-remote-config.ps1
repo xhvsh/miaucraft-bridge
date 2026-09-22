@@ -1,4 +1,4 @@
-# Dev-only: serves bridge\remote-config.json over HTTP so the local plugin can
+# Dev-only: serves remote-config.json over HTTP so the local plugin can
 # fetch its remote config without pushing to GitHub.
 param(
   [int]$Port = 8099

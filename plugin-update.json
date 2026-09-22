@@ -1,6 +1,6 @@
 {
-    "version":  "2.4.2",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.4.2.jar",
-    "sha256":  "4807aa45a62e0a17a358a08a5590d6d16cd92e25835b607477d1d3d88f29c11a",
-    "notes":  "Fix AFK flag lag: the afk column was only refreshed on the ~5 minute presence heartbeat, so a player who moved again still showed as AFK for up to that long. Now a move clears the AFK flag immediately (write on the AFK->active transition), and heartbeats only write when the state actually changes."
+    "version":  "2.4.3",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/releases/miaucraft-bridge-plugin-2.4.3.jar",
+    "sha256":  "ed2689d86b482535225090f86f056a89b897b20d2a915c47e476011c7db71e3e",
+    "notes":  "Release 2.4.3"
 }

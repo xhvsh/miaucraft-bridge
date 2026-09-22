@@ -21,7 +21,7 @@ import java.util.logging.Logger;
 
 /**
  * The GitHub-driven behavior config. Every server on every environment polls
- * the same URL, so editing bridge/remote-config.json and pushing to GitHub
+ * the same URL, so editing remote-config.json and pushing to GitHub
  * reconfigures all of them without touching any plugin jar.
  *
  * Precedence (highest wins): local config.yml "overrides" > remote JSON >

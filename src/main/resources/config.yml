@@ -14,7 +14,7 @@ supabase:
 # Where the live behavior is fetched from (a public raw GitHub URL).
 # Pushing changes to that file pushes them to every server running the plugin.
 remote:
-  url: "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/remote-config.json"
+  url: "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/remote-config.json"
   poll-seconds: 300
   cache-file: "remote-config-last-good.json"
 

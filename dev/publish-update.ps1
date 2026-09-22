@@ -1,10 +1,10 @@
 # Publishes a new plugin build to the local dev "remote" (served by
 # remote-config-server.js) so the running server can self-update to it.
 #
-#   powershell -File bridge/dev/publish-update.ps1 -Version 2.1.0
+#   powershell -File dev/publish-update.ps1 -Version 2.1.0
 #
 # Bumps pom.xml to the given version, builds, copies the jar to
-# bridge/dev/jars/, and writes bridge/dev/plugin-update.json with its sha256.
+# dev/jars/, and writes dev/plugin-update.json with its sha256.
 param(
   [Parameter(Mandatory = $true)][string]$Version,
   [string]$BaseUrl = "http://127.0.0.1:8099"
@@ -20,8 +20,7 @@ function WriteNoBom([string]$Path, [string]$Text) {
 }
 
 $devDir = $PSScriptRoot
-$bridgeDir = (Resolve-Path (Join-Path $devDir "..")).Path
-$pluginRoot = (Resolve-Path (Join-Path $devDir "..\plugin\miaucraft-bridge-plugin")).Path
+$pluginRoot = (Resolve-Path (Join-Path $devDir "..")).Path
 $pom = Join-Path $pluginRoot "pom.xml"
 
 $pomText = Get-Content -LiteralPath $pom -Raw

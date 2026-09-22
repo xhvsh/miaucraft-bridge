@@ -1,9 +1,9 @@
 // Dev-only: serves the local test server's "remote" files so the plugin fetches
 // them exactly like it does from GitHub in production:
-//   /remote-config.json  -> bridge/remote-config.json
-//   /plugin-update.json  -> bridge/dev/plugin-update.json
-//   /jars/<file>         -> bridge/dev/jars/<file>
-// Start with: powershell -File bridge/dev/start-remote-config.ps1
+//   /remote-config.json  -> remote-config.json
+//   /plugin-update.json  -> dev/plugin-update.json
+//   /jars/<file>         -> dev/jars/<file>
+// Start with: powershell -File dev/start-remote-config.ps1
 const http = require("http");
 const fs = require("fs");
 const path = require("path");

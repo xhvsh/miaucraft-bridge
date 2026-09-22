@@ -13,9 +13,9 @@ supabase:
   schema: "public"
 
 # Live behavior is fetched from the public GitHub config. Push edits to
-# bridge/remote-config.json to reconfigure every running server.
+# remote-config.json here to reconfigure every running server.
 remote:
-  url: "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/remote-config.json"
+  url: "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/remote-config.json"
   poll-seconds: 300
   cache-file: "remote-config-last-good.json"
 
@@ -25,7 +25,7 @@ overrides: {}
 # Master switch - set false to fully disable all DB traffic.
 enabled: true
 
-# Self-updater. Manifest defaults to .../bridge/plugin-update.json (derived
+# Self-updater. Manifest defaults to .../plugin-update.json (derived
 # from remote.url), so future plugin fixes are installed with /bridge update.
 update:
   enabled: true

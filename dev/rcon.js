@@ -1,7 +1,7 @@
 // Minimal Source RCON client for the local dev server so tests can run
 // commands without touching the server console.
 //
-//   node bridge/dev/rcon.js "bridge update"
+//   node dev/rcon.js "bridge update"
 //
 // Reads host/port/password from env (RCON_HOST/RCON_PORT/RCON_PASSWORD) with
 // defaults matching the local server.properties.

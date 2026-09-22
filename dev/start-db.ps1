@@ -2,7 +2,7 @@
 # the bridge plugin and the website talk to during local testing.
 #
 # Requires Docker Desktop (running) and the Supabase CLI (either installed
-# globally or available via npx). The local project lives in bridge/dev/supabase.
+# globally or available via npx). The local project lives in dev/supabase.
 param(
   [string]$DevDir = $PSScriptRoot,
   [switch]$Reset
@@ -51,7 +51,7 @@ try {
   Invoke-SupabaseCli @("start")
   Write-Host ""
   Write-Host "Copy the API URL and service_role key above into:"
-  Write-Host "  bridge\dev\server\plugins\MiaucraftBridge\config.yml"
+  Write-Host "  dev\server\plugins\MiaucraftBridge\config.yml"
   Write-Host "  (supabase.url = http://127.0.0.1:54321, supabase.service-role-key = service_role)"
   Invoke-SupabaseCli @("status")
 } finally {

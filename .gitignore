@@ -1,0 +1,30 @@
+# Maven build output for the bridge plugin
+target/
+
+# Local Paper test server (jar, worlds, logs, per-server plugin config/secrets)
+dev/server/
+
+# Supabase CLI local stack (contains local keys / ephemeral state)
+dev/supabase/.temp/
+dev/supabase/.branches/
+
+# Local runtime state written by the plugin
+**/bridge-state.json
+
+# Local developer config (real secrets live here, never commit)
+config.local.yml
+
+# Local dev update artifacts (the release manifest and jars live at repo root)
+dev/jars/
+dev/plugin-update.json
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.iml
+.idea/
+.vscode/
+
+# Any loose log / crash dumps
+*.log
+hs_err_pid*.log

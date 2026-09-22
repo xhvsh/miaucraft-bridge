@@ -1,4 +1,4 @@
-# Starts the local Paper test server (bridge/dev/server).
+# Starts the local Paper test server (dev/server).
 param(
   [string]$ServerDir = (Join-Path $PSScriptRoot "server"),
   [int]$MemoryMb = 2048,

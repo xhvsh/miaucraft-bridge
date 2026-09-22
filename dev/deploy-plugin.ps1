@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$pluginRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\plugin\miaucraft-bridge-plugin")).Path
+$pluginRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 Push-Location $pluginRoot
 try {

@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/remote-config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/remote-config.schema.json",
   "version": 1,
   "log": {
     "level": "INFO"

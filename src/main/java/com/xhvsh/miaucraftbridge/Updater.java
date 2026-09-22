@@ -50,7 +50,7 @@ public final class Updater {
    *  the manifest is read through the Contents API instead: raw.githubusercontent.com
    *  serves a fixed manifest URL from an edge cache that lags a push by minutes. */
   private static final String DEFAULT_MANIFEST =
-      "https://api.github.com/repos/xhvsh/miaucraft/contents/bridge/plugin-update.json?ref=main";
+      "https://api.github.com/repos/xhvsh/miaucraft-bridge/contents/plugin-update.json?ref=main";
 
   /** Rewrites a raw.githubusercontent.com URL into the always-fresh Contents API form
    *  (bare contents URLs are passed through untouched). */
