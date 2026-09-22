@@ -69,10 +69,6 @@
       "web-body-format": "<{username}> {message}",
       "web-body-color": "WHITE"
     },
-    "biomes": {
-      "enabled": true,
-      "max-blocks-radius": 0
-    },
     "system-notices": {
       "enabled": true
     }

@@ -1,6 +1,6 @@
 {
-    "version":  "2.3.2",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.3.2.jar",
-    "sha256":  "44820f3a51d2e3a3d58b1739aadbbf1fb959850a23f363134f1beed2e957a63d",
-    "notes":  "2.3.2: every published build now has its own unique version, so the jar name ALWAYS changes when the file changes. /bridge status shows both the running version AND the running jar's sha, and /bridge update prints sha's too - if the sha next to 'current' does not match the sha in this manifest, you are NOT running this build. Apply mechanics unchanged: /bridge update apply installs the new jar and the server restarts; the restart (not the updater) is what takes the couple of minutes. From 2.3.1: biome scans are command-only and scan the WHOLE world in one go (background timer removed) - run /bridge biomes rescan all once after updating. Includes the hollow-chunk fix (top biome layer + single-entry palettes with no data array). Requires the 20260101000300_biomes migration and the 20260101000500_biomes_snapshot RPC."
+    "version":  "2.4.0",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft/main/bridge/releases/miaucraft-bridge-plugin-2.4.0.jar",
+    "sha256":  "577275210e4f8d49b02b8dcaa1679670791c3bef366a211cb7093aeefab828b6",
+    "notes":  "Revert the biome map collector from the 2.3.x series and rebaseline on the pre-2.3.0 feature set. Version clipped up from 2.2.18 to 2.4.0 (higher than the last published 2.3.2) so the auto-updater treats this as an update rather than a rollback. Removes the /bridge biomes commands, biome scanner, and biome snapshot functions."
 }

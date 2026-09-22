@@ -33,8 +33,7 @@ public class SinkManager {
       "chat_messages",
       "whitelist",
       "server_status_public",
-      "server_tps_samples",
-      "biomes");
+      "server_tps_samples");
 
   private final SupabaseRest rest;
   private final int maxBatch;
