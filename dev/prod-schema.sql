@@ -11,9 +11,13 @@
 --   * service_role lacks DML on player_achievements / player_achievement_criteria,
 --   * player_achievement* have no ON DELETE CASCADE, and delete_account_by_username
 --     leaves gameplay rows behind,
---   * player_stats / player_achievements / player_achievement_criteria /
---     live_positions are readable by anon,
 --   * whitelist_commands.status has no 'processing' state and no claim columns.
+--
+-- NOT drift, and must not be "fixed": player_stats, player_achievements,
+-- player_achievement_criteria and live_positions are world-readable on purpose.
+-- The leaderboard, the stat pages, the achievement menu and the live map are
+-- public, so anon SELECT and the public select policies shown below are the
+-- intended state.
 --
 
 \restrict FV1wXX5NeFVyd3g4nMIfXOHfb9S3ANjj2wf67Dw9xhb7j1gW4esH1A8oHCORv4h

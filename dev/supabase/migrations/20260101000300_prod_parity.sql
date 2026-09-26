@@ -9,13 +9,16 @@
 --   1. service_role could not write player_achievements / player_achievement-
 --      criteria, so every achievement insert failed with permission denied.
 --   2. player_achievement* had no ON DELETE CASCADE, which blocked any
---      deletion of a players row, and account deletion never removed the
---      gameplay data at all.
---   3. player_stats / player_achievements / player_achievement_criteria /
---      live_positions were readable by anon (i.e. the public internet).
+--      deletion of a players row, and delete_account_by_username left the
+--      gameplay data behind.
+--   3. Public read access on stats / achievements / progress / live positions
+--      is intentional, so this migration asserts that posture rather than
+--      revoking it. See section 4.
 --   4. whitelist_commands had no 'processing' state and no claim columns, so
 --      2.4.4's atomic claim failed with HTTP 400 on every pending command.
 --   5. No retention: chat, positions and TPS samples grew forever.
+--
+-- The whitelist itself is the one table kept private, and stays that way.
 --
 -- server_tps_samples already exists in production and matches the local
 -- definition, so section 2's create is a no-op there; it is kept so the file
@@ -43,11 +46,14 @@ grant select, insert, update, delete on table
 
 grant usage, select on all sequences in schema public to service_role;
 
--- The plugin's tables have no rows the website should ever read with anon.
-revoke select on table public.player_stats from anon;
-revoke select on table public.player_achievements from anon;
-revoke select on table public.player_achievement_criteria from anon;
-revoke select on table public.live_positions from anon;
+-- The whitelist stays private. Production already grants anon no SELECT here
+-- and the only policy is owner-scoped, so this is a defensive no-op that also
+-- cleans up the stray REFERENCES/TRIGGER/TRUNCATE/MAINTAIN anon grants.
+--
+-- Everything else the website reads is deliberately world-readable - stats,
+-- achievements, achievement progress and live positions are all public pages,
+-- and an earlier draft of this migration wrongly locked them to signed-in
+-- users. Section 4 below now asserts the public posture instead of revoking it.
 revoke select on table public.whitelist from anon;
 
 -- ---------------------------------------------------------------------------
@@ -179,57 +185,72 @@ grant all on function public.delete_account_by_username(text) to authenticated;
 revoke all on function public.delete_account_by_username(text) from public;
 
 -- ---------------------------------------------------------------------------
--- 4. Gameplay data is for signed-in users only
+-- 4. Public read access is intentional - assert it, do not revoke it
 --
--- These four tables were readable with the SUPABASE_ANON_KEY, i.e. by anyone
--- who found the project URL: per-player statistics, achievement progress and
--- live coordinates. The catalog (achievements/achievement_criteria) stays
--- world-readable on purpose - the site needs it to render the menu.
+-- stats, achievements, achievement progress and live positions are public
+-- pages: the leaderboard, the per-player stat pages, the achievement menu and
+-- the live map must all render for a logged-out visitor. This section makes
+-- that posture explicit and idempotent, so the grants and policies are correct
+-- on a fresh database, on production, and on any database where an earlier
+-- draft of this migration had already locked them down.
 --
--- The plugin is unaffected: it writes with the service_role key, which bypasses
--- RLS. Website visitors must be signed in for stats/achievement progress and
--- for the live map.
+-- live_positions keeps a filter rather than a blanket read: only players who
+-- are not hidden and have live tracking enabled expose their coordinates.
+-- That is the policy production already has; it is re-created identically.
 -- ---------------------------------------------------------------------------
+
+grant select on table public.player_stats to anon, authenticated;
+grant select on table public.player_achievements to anon, authenticated;
+grant select on table public.player_achievement_criteria to anon, authenticated;
+grant select on table public.live_positions to anon, authenticated;
 
 drop policy if exists "player_stats are publicly readable" on public.player_stats;
 create policy player_stats_read
   on public.player_stats for select
-  to authenticated
+  to anon, authenticated
   using (true);
 
 drop policy if exists "Public read access" on public.player_achievements;
 create policy player_achievements_read
   on public.player_achievements for select
-  to authenticated
+  to anon, authenticated
   using (true);
 
 drop policy if exists "Public read access" on public.player_achievement_criteria;
 create policy player_achievement_criteria_read
   on public.player_achievement_criteria for select
-  to authenticated
+  to anon, authenticated
   using (true);
 
--- Same visibility rule as before (online, non-hidden, tracking-enabled
--- players) but for signed-in users only: live coordinates are gameplay
--- telemetry and were readable with the public anon key.
 drop policy if exists live_positions_public_read on public.live_positions;
 create policy live_positions_read
   on public.live_positions for select
-  to authenticated
+  to anon, authenticated
   using (EXISTS (
     SELECT 1 FROM public.players p
     WHERE p.id = live_positions.player_id
       AND p.hidden = false
       AND COALESCE(p.live_tracking_enabled, true)));
 
-grant select on table public.player_stats to authenticated;
-grant select on table public.player_achievements to authenticated;
-grant select on table public.player_achievement_criteria to authenticated;
-grant select on table public.live_positions to authenticated;
+-- The achievement catalog stays world-readable too; the site needs it to
+-- render the menu. Re-asserted here so a fresh database gets it as well.
+grant select on table public.achievements to anon, authenticated;
+grant select on table public.achievement_criteria to anon, authenticated;
 
--- players stays world-readable through its own policy because it is what the
--- public leaderboard reads, but it is restricted to non-hidden players and
--- only exposes the columns the site needs via its view/RPC.
+drop policy if exists "Public read access" on public.achievements;
+create policy achievements_read
+  on public.achievements for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "Public read access" on public.achievement_criteria;
+create policy achievement_criteria_read
+  on public.achievement_criteria for select
+  to anon, authenticated
+  using (true);
+
+-- players is world-readable through its own policy because it is what the
+-- public leaderboard reads, restricted to non-hidden players.
 
 -- ---------------------------------------------------------------------------
 -- 5. Whitelist command claiming
