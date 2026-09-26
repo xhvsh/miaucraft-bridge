@@ -119,6 +119,20 @@ public class SinkManager {
     sinks.values().forEach(BatchSink::resetBatches);
   }
 
+  /**
+   * Flushes one table on its own, without waiting for the shared cycle and
+   * without disturbing the other tables' batching.
+   *
+   * <p>Only for a table that is latency-sensitive and low-volume (chat), and
+   * that no other table depends on: the full cycle still runs on its own timer
+   * and picks up whatever this misses. An empty queue completes immediately
+   * without issuing a request, so an idle table costs nothing.
+   */
+  public CompletableFuture<Void> flushTable(String table) {
+    BatchSink sink = sinks.get(table);
+    return sink == null ? CompletableFuture.completedFuture(null) : sink.flush();
+  }
+
   public int pending(String table) {
     BatchSink sink = sinks.get(table);
     return sink == null ? 0 : sink.size();

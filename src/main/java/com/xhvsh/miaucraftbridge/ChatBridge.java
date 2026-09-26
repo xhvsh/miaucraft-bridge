@@ -37,6 +37,15 @@ public final class ChatBridge {
   private static final int RELAY_ID_MEMORY = 500;
   private static final int DEFAULT_MAX_LENGTH = 500;
 
+  /**
+   * How long a chat row may wait for the shared flush cycle before it gets a
+   * flush of its own. Short because chat is the one thing a player notices
+   * being late; the cycle itself has to stay at 5s so that the high-volume
+   * stats and position tables keep building large batches.
+   */
+  private static final int DEFAULT_FLUSH_DELAY_MS = 400;
+  private static final int MAX_FLUSH_DELAY_MS = 5000;
+
   /** At least {@code yyyy-MM-ddTHH:mm}; seconds/fraction/zone are optional. */
   private static final java.util.regex.Pattern TIMESTAMP =
       java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2})?(\\.\\d+)?\\s*(Z|[+-]\\d{2}(:?\\d{2})?)?");
@@ -51,6 +60,10 @@ public final class ChatBridge {
   private volatile boolean polling = false;
   private volatile int lastRelayed = 0;
   private volatile long lastWarnMs = 0;
+
+  /** True while a fast chat flush is scheduled, so bursts coalesce into one. */
+  private final java.util.concurrent.atomic.AtomicBoolean fastFlushQueued =
+      new java.util.concurrent.atomic.AtomicBoolean(false);
 
   public ChatBridge(Plugin plugin, SinkManager sinks, SupabaseRest rest, PersistedState state,
       Supplier<RemoteConfig> config, Logger log) {
@@ -84,6 +97,7 @@ public final class ChatBridge {
     row.addProperty("username", event.getPlayer().getName());
     row.addProperty("message", message);
     sinks.sink("chat_messages", "id", false, "id").add(row);
+    queueFastFlush(cfg);
   }
 
   /** Writes a system notice row (server up/down). */
@@ -94,6 +108,49 @@ public final class ChatBridge {
     row.addProperty("kind", "system");
     row.addProperty("message", message);
     sinks.sink("chat_messages", "id", false, "id").add(row);
+    queueFastFlush(cfg);
+  }
+
+  /**
+   * Flushes {@code chat_messages} shortly after the first row is queued instead
+   * of leaving it for the shared 5s cycle.
+   *
+   * <p>This is not extra traffic in any meaningful sense. The cycle batches
+   * whatever has accumulated, so a chatty minute already costs a handful of
+   * requests either way; all this changes is when the first one goes out. Only
+   * one flush is ever pending, and it drains the whole queue, so a burst of
+   * messages still leaves in a single request. Rows that miss this (a race
+   * right at the end of a flush) are picked up by the regular cycle.
+   */
+  private void queueFastFlush(RemoteConfig cfg) {
+    if (!plugin.isEnabled()) return;
+    long ticks = flushDelayTicks(cfg);
+    if (!fastFlushQueued.compareAndSet(false, true)) return;
+    try {
+      Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+        try {
+          sinks.flushTable("chat_messages");
+        } finally {
+          fastFlushQueued.set(false);
+        }
+      }, ticks);
+    } catch (IllegalStateException | IllegalArgumentException e) {
+      // The scheduler refuses new tasks once the plugin is disabling; the
+      // regular cycle still flushes the row on shutdown.
+      fastFlushQueued.set(false);
+    }
+  }
+
+  /**
+   * Converts the configured delay to scheduler ticks, clamped so a remote
+   * config cannot stall chat for minutes or ask for a sub-tick delay.
+   */
+  static long flushDelayTicks(RemoteConfig cfg) {
+    int ms = cfg.collectorInt("chat", "flush-delay-ms", DEFAULT_FLUSH_DELAY_MS);
+    if (ms < 0) ms = 0;
+    if (ms > MAX_FLUSH_DELAY_MS) ms = MAX_FLUSH_DELAY_MS;
+    // One tick is the floor: Bukkit cannot run a task sooner than that.
+    return Math.max(1L, (ms + 49L) / 50L);
   }
 
   /** Strips control characters and clips to the configured length. */

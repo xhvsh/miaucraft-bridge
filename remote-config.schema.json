@@ -112,8 +112,14 @@
           "additionalProperties": false,
           "properties": {
             "enabled": { "type": "boolean" },
-            "web-poll-seconds": { "type": "integer", "minimum": 2 },
-            "max-length": { "type": "integer", "minimum": 32, "maximum": 4000, "description": "Longest stored chat message; longer messages are clipped." },
+      "web-poll-seconds": { "type": "integer", "minimum": 2 },
+      "flush-delay-ms": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 5000,
+        "description": "How long a chat message may wait for a flush of its own before the shared 5s cycle. Lower = more live, and near-zero cost: rows are batched either way, only the timing changes. Clamped to 0-5000, one tick (50ms) is the floor."
+      },
+      "max-length": { "type": "integer", "minimum": 32, "maximum": 4000, "description": "Longest stored chat message; longer messages are clipped." },
             "relay-to-players": { "type": "boolean" },
             "web-prefix": { "type": "string", "description": "Text before each relayed website message. Edit + push to change the format live." },
             "web-prefix-color": { "type": "string", "description": "Named colour (aqua, dark_gray, ...) or hex (#55ffdd) for web-prefix. Empty = aqua." },

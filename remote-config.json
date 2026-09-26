@@ -60,6 +60,7 @@
     "chat": {
       "enabled": true,
       "web-poll-seconds": 4,
+      "flush-delay-ms": 400,
       "max-length": 500,
       "relay-to-players": true,
       "web-prefix": "[web] ",
