@@ -1,6 +1,8 @@
 package com.xhvsh.miaucraftbridge;
 
-import java.nio.charset.StandardCharsets;import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -9,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipFile;
 
 /**
  * Runs as its own JVM after the server has shut down, so it can replace the
@@ -16,10 +19,23 @@ import java.util.Map;
  * <b>staged</b> jar on its classpath - never the target - which keeps the
  * target free to overwrite.
  *
+ * <p>Safety rails, because this process owns the server's plugin folder:
+ * <ul>
+ *   <li>the previous jar is kept as {@code .bak} until the new server has
+ *       survived a few seconds; if the relaunch dies immediately the backup is
+ *       put back, so a bad build cannot leave the server unbootable,</li>
+ *   <li>the swap is a same-directory temp file plus an atomic move, so the
+ *       target is never a half-written jar,</li>
+ *   <li>the staged jar is verified as a readable archive before it is
+ *       installed.</li>
+ * </ul>
+ *
  * <p>Deliberately dependency-free (JDK only): no Bukkit/Paper classes are
  * available in this process.
  */
 public final class UpdateHelper {
+
+  private static final long RELAUNCH_WATCH_MS = 20_000L;
 
   private UpdateHelper() {
   }
@@ -39,15 +55,52 @@ public final class UpdateHelper {
       Path target = Path.of(p.get("target"));
       boolean relaunch = Boolean.parseBoolean(p.getOrDefault("relaunch", "true"));
 
-      waitForExit(pid, log);
+      if (!Files.isRegularFile(staged)) {
+        log(log, "updater: FAILED: staged jar is gone (" + staged + ")");
+        return;
+      }
+      try (ZipFile zip = new ZipFile(staged.toFile())) {
+        if (zip.getEntry("plugin.yml") == null) {
+          log(log, "updater: FAILED: staged jar has no plugin.yml");
+          return;
+        }
+      }
 
+      waitForExit(pid, log);
       // Give the OS a moment to fully release the jar handle.
       Thread.sleep(800);
-      Files.copy(staged, target, StandardCopyOption.REPLACE_EXISTING);
-      log(log, "updater: replaced " + target);
+
+      Path backup = target.resolveSibling(target.getFileName() + ".bak");
+      if (Files.isRegularFile(target)) {
+        Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
+        log(log, "updater: backed up current jar to " + backup);
+      }
+      replace(staged, target);
+      log(log, "updater: replaced " + target + " (" + Files.size(target) + " bytes)");
 
       if (relaunch) {
-        relaunch(p, log);
+        Process started;
+        try {
+          started = relaunch(p, log);
+        } catch (Exception e) {
+          // A failed relaunch must not leave the new jar in place with a dead
+          // server: put the previous one back and tell the operator why.
+          log(log, "updater: relaunch threw (" + e + ") - restoring the previous jar");
+          restore(backup, target, log);
+          return;
+        }
+        if (started == null) {
+          log(log, "updater: relaunch did not start - restoring the previous jar");
+          restore(backup, target, log);
+          return;
+        }
+        if (!survives(started, log)) {
+          log(log, "updater: new server exited early - restoring the previous jar");
+          restore(backup, target, log);
+          return;
+        }
+        Files.deleteIfExists(backup);
+        log(log, "updater: new server is up, backup removed");
       } else {
         log(log, "updater: relaunch disabled - start the server manually");
       }
@@ -63,7 +116,29 @@ public final class UpdateHelper {
     log(log, "updater: server process " + pid + " exited");
   }
 
-  private static void relaunch(Map<String, String> p, Path log) throws Exception {
+  /** Temp file in the target's own directory + atomic move. */
+  private static void replace(Path from, Path to) throws Exception {
+    Path tmp = to.resolveSibling(to.getFileName() + ".new");
+    Files.copy(from, tmp, StandardCopyOption.REPLACE_EXISTING);
+    try {
+      Files.move(tmp, to, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    } catch (AtomicMoveNotSupportedException e) {
+      Files.move(tmp, to, StandardCopyOption.REPLACE_EXISTING);
+    }
+  }
+
+  private static void restore(Path backup, Path target, Path log) {
+    try {
+      if (Files.isRegularFile(backup)) {
+        replace(backup, target);
+        log(log, "updater: restored " + target + " from backup");
+      }
+    } catch (Exception e) {
+      log(log, "updater: RESTORE FAILED (" + e + ") - install " + backup + " by hand");
+    }
+  }
+
+  private static Process relaunch(Map<String, String> p, Path log) throws Exception {
     String command = p.getOrDefault("command", "").trim();
     boolean win = System.getProperty("os.name", "").toLowerCase().contains("win");
     ProcessBuilder pb;
@@ -92,8 +167,28 @@ public final class UpdateHelper {
         : log.getParent().resolve("relaunch.log");
     pb.redirectErrorStream(true);
     pb.redirectOutput(ProcessBuilder.Redirect.appendTo(out.toFile()));
-    pb.start();
-    log(log, "updater: relaunched server");
+    Process started = pb.start();
+    log(log, "updater: relaunched server (pid " + started.pid() + ")");
+    return started;
+  }
+
+  /**
+   * Watches the relaunched process: a build that cannot start dies within
+   * seconds, which is the window in which the backup is still worth having.
+   * The handle is the launched command (a shell that waits for the server on
+   * Windows, the server itself on Unix), which is the best signal available
+   * without guessing at the host's launcher.
+   */
+  private static boolean survives(Process started, Path log) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + RELAUNCH_WATCH_MS;
+    while (System.currentTimeMillis() < deadline) {
+      if (!started.isAlive()) {
+        return false;
+      }
+      Thread.sleep(1000);
+    }
+    log(log, "updater: new server still running after " + (RELAUNCH_WATCH_MS / 1000) + "s");
+    return true;
   }
 
   /** Simple KEY=VALUE lines, split on the first '=' - no escape processing. */

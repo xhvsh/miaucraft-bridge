@@ -7,11 +7,8 @@
   "server": {
     "name": "Miaucraft"
   },
-  "update": {
-    "check-seconds": 90
-  },
   "status": {
-    "heartbeat-seconds": 8
+    "heartbeat-seconds": 25
   },
   "collectors": {
     "presence": {
@@ -63,6 +60,7 @@
     "chat": {
       "enabled": true,
       "web-poll-seconds": 4,
+      "max-length": 500,
       "relay-to-players": true,
       "web-prefix": "[web] ",
       "web-prefix-color": "AQUA",

@@ -23,7 +23,16 @@ remote:
 overrides: {}
 
 # Master switch - set false to fully disable all DB traffic.
+# It gates queue admission AND every direct request (reads, deletes, admin
+# diagnostics), so flipping it really stops all Supabase traffic until the
+# plugin is reloaded. A server that still has queued rows keeps them in memory
+# (they are not deleted); enable again to drain them.
 enabled: true
+
+# Maximum rows per PostgREST batch. Rows are coalesced per conflict key first,
+# so this is only the wire chunk size. Also bounds each sink's queue at
+# max(1000, 50 x this) rows before the oldest rows are dropped.
+max-batch-size: 300
 
 # Self-updater. Code-level behavior can't come from the remote *behavior*
 # config, so these live here. The plugin downloads a newer jar, replaces its
@@ -31,6 +40,10 @@ enabled: true
 # the locked jar can be replaced). Default manifest-url is derived from
 # remote.url by swapping the file name to plugin-update.json, so pointing
 # remote.url at a local server also points updates there.
+#
+# Trust rules enforced by the code: the manifest MUST include a valid sha256,
+# downloads must be https, the jar is size-capped while streaming, and the
+# previous jar is kept as <jar>.bak until the relaunched server survives.
 update:
   enabled: true
   # Leave blank to derive from remote.url (…/remote-config.json -> …/plugin-update.json).
@@ -43,4 +56,5 @@ update:
   relaunch: true
   # Optional: exact command line to run instead of the auto-detected java
   # command when relaunching, e.g. "java -Xmx2048M -jar paper.jar nogui".
+  # Must be a single line.
   restart-command: ""

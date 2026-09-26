@@ -40,6 +40,7 @@ import java.util.logging.Logger;
  */
 public final class AchievementCollector implements Listener {
 
+  private final org.bukkit.plugin.Plugin plugin;
   private final SinkManager sinks;
   private final Supplier<RemoteConfig> config;
   private final Logger log;
@@ -50,10 +51,20 @@ public final class AchievementCollector implements Listener {
   // retried after a restart instead of being skipped forever.
   private final java.util.concurrent.ConcurrentHashMap<String, String> achSig = new java.util.concurrent.ConcurrentHashMap<>();
   private final java.util.concurrent.ConcurrentHashMap<String, Boolean> critSig = new java.util.concurrent.ConcurrentHashMap<>();
-  private final AtomicBoolean scanning = new AtomicBoolean(false);
+  private final AtomicBoolean onlineArmed = new AtomicBoolean(false);
+  private final AtomicBoolean offlineScanning = new AtomicBoolean(false);
+
+  /** Catalog data, only ever read/written on the main thread. */
+  private String catalogSignature = null;
+  private final Map<String, List<String>> critNamesByKey = new HashMap<>();
+  private final Map<String, Integer> critTotals = new HashMap<>();
+  private final Map<String, Integer> critMin = new HashMap<>();
+  private volatile OnlineJob onlineJob;
   private volatile long lastScanMs = 0L;
 
-  public AchievementCollector(SinkManager sinks, PersistedState state, Supplier<RemoteConfig> config, Logger log) {
+  public AchievementCollector(org.bukkit.plugin.Plugin plugin, SinkManager sinks, PersistedState state,
+      Supplier<RemoteConfig> config, Logger log) {
+    this.plugin = plugin;
     this.sinks = sinks;
     this.config = config;
     this.log = log;
@@ -65,16 +76,41 @@ public final class AchievementCollector implements Listener {
 
   // -------------------------------------------------------------- catalog
 
-  /** Publishes the static achievement menu + criteria. Main thread, once. */
+  /**
+   * Publishes the static achievement menu + criteria. Main thread.
+   *
+   * <p>The catalog only changes when a datapack does, but the remote config is
+   * re-applied every few minutes, so the previous implementation re-enqueued
+   * ~3000 identical rows on every poll. The signature check keeps a re-apply
+   * free unless the catalog really changed.
+   */
   public void syncCatalog() {
+    syncCatalog(false);
+  }
+
+  public void syncCatalog(boolean force) {
     RemoteConfig cfg = config.get();
     if (!cfg.collectorEnabled("achievements") || !cfg.boolVal("collectors.achievements.catalog-sync", true)) {
       return;
     }
+    // The fingerprint covers the rendered content, not just the key set: a
+    // datapack (or resource pack) can retitle/re-icon an existing advancement
+    // without adding or removing any, and the web has to pick that up.
+    String signature = catalogSignature();
+    if (!force && signature.equals(catalogSignature)) {
+      log.fine("Achievement catalog unchanged, skipping re-publish.");
+      return;
+    }
+    catalogSignature = signature;
+
     int achievements = 0;
     int criteria = 0;
     int skipped = 0;
 
+    // Re-walk for the catalog maps the offline scan needs (main thread only).
+    critNamesByKey.clear();
+    critTotals.clear();
+    critMin.clear();
     Iterator<Advancement> it = Bukkit.advancementIterator();
     while (it.hasNext()) {
       Advancement advancement = it.next();
@@ -83,6 +119,10 @@ public final class AchievementCollector implements Listener {
         skipped++;
         continue;
       }
+      String key = advancement.getKey().toString();
+      critNamesByKey.put(key, new java.util.ArrayList<>(advancement.getCriteria()));
+      critTotals.put(key, advancement.getCriteria().size());
+      critMin.put(key, minCriteria(advancement));
       try {
         criteria += catalogRow(advancement, display);
         achievements++;
@@ -93,6 +133,35 @@ public final class AchievementCollector implements Listener {
     }
     log.info("Achievement catalog: " + achievements + " achievement(s), "
         + criteria + " criteria (skipped " + skipped + " non-displayable, errored, or any-of advancement(s)).");
+  }
+
+  /** Main thread: content hash of everything the catalog rows carry. */
+  private String catalogSignature() {
+    StringBuilder fingerprint = new StringBuilder();
+    Iterator<Advancement> it = Bukkit.advancementIterator();
+    while (it.hasNext()) {
+      Advancement advancement = it.next();
+      fingerprint.append(advancement.getKey()).append('|');
+      AdvancementDisplay display = advancement.getDisplay();
+      if (display != null) {
+        try {
+          fingerprint.append(PlainTextComponentSerializer.plainText().serialize(display.title())).append('|');
+          fingerprint.append(PlainTextComponentSerializer.plainText().serialize(display.description())).append('|');
+          fingerprint.append(display.frame().name()).append('|');
+          fingerprint.append(display.isHidden()).append('|');
+          fingerprint.append(display.icon() == null ? "" : display.icon().getType().name()).append('|');
+        } catch (Exception ex) {
+          fingerprint.append("display-error|");
+        }
+      }
+      fingerprint.append(advancement.getCriteria().size()).append('|');
+      for (String criterion : advancement.getCriteria()) {
+        fingerprint.append(criterion).append(',');
+      }
+      Integer min = minCriteria(advancement);
+      fingerprint.append('|').append(min == null ? -1 : min).append(';');
+    }
+    return Integer.toHexString(fingerprint.toString().hashCode()) + ":" + fingerprint.length();
   }
 
   /** Publishes one catalog row (+ its criteria). Never throws; min_criteria is best-effort. */
@@ -160,42 +229,104 @@ public final class AchievementCollector implements Listener {
     }
   }
 
+  /** Drops a quitting player's progress cache so it cannot grow forever. */
+  @EventHandler(priority = EventPriority.MONITOR)
+  public void onQuit(org.bukkit.event.player.PlayerQuitEvent e) {
+    String prefix = e.getPlayer().getUniqueId() + "|";
+    achSig.keySet().removeIf(k -> k.startsWith(prefix));
+    critSig.keySet().removeIf(k -> k.startsWith(prefix));
+  }
+
   // --------------------------------------------------------------- scans
 
-  /** Periodic progress scan over online players; call off the main thread. */
+  /**
+   * Arms a progress scan over the online players. Safe to call from any
+   * thread - it only flips a flag. The roster is snapshotted and the work is
+   * pumped in small main-thread slices by {@link #pumpOnlineScan()} (Bukkit
+   * forbids reading players/advancements off the main thread).
+   */
   public void scanOnline() {
-    RemoteConfig cfg = config.get();
-    if (!cfg.collectorEnabled("achievements")) return;
-    if (!scanning.compareAndSet(false, true)) return;
+    if (!config.get().collectorEnabled("achievements")) return;
+    if (onlineJob != null) return;
+    onlineArmed.set(true);
+  }
+
+  /** Main thread: starts an armed scan and advances it by one small slice. */
+  public void pumpOnlineScan() {
+    if (!config.get().collectorEnabled("achievements")) {
+      onlineJob = null;
+      onlineArmed.set(false);
+      return;
+    }
+    OnlineJob job = onlineJob;
+    if (job == null) {
+      if (!onlineArmed.compareAndSet(true, false)) return;
+      job = new OnlineJob();
+      onlineJob = job;
+    }
     try {
-      int scanned = 0;
-      for (Player p : new java.util.ArrayList<>(Bukkit.getOnlinePlayers())) {
-        try {
-          scanPlayer(p);
-          scanned++;
-        } catch (Exception ex) {
-          log.log(Level.WARNING, "Achievement scan failed for " + p.getName(), ex);
-        }
+      if (job.step(System.nanoTime() + 2_000_000L)) {
+        lastScanMs = System.currentTimeMillis();
+        onlineJob = null;
+        onlineArmed.set(false);
       }
-      lastScanMs = System.currentTimeMillis();
-      if (scanned > 0) {
-        if (cfg.debugLog()) {
-          log.info("Achievement scan covered " + scanned + " online player(s).");
-        } else {
-          log.fine("Achievement scan covered " + scanned + " online player(s).");
-        }
-      }
-    } finally {
-      scanning.set(false);
+    } catch (Exception ex) {
+      log.log(Level.WARNING, "Achievement scan failed", ex);
+      onlineJob = null;
+      onlineArmed.set(false);
     }
   }
 
+  public boolean onlineScanArmed() {
+    return onlineJob != null || onlineArmed.get();
+  }
+
+  /** Main thread. Scans one player completely (used by the join path/tests). */
   public void scanPlayer(Player player) {
     Iterator<Advancement> it = Bukkit.advancementIterator();
     while (it.hasNext()) {
       Advancement advancement = it.next();
       if (advancement.getDisplay() == null) continue;
       collectOne(player, advancement);
+    }
+  }
+
+  /**
+   * A resumable (player, advancement) walk, advanced a slice at a time. Each
+   * player gets a fresh advancement iterator: a single shared iterator is
+   * consumed by the first player and every later player is skipped entirely.
+   */
+  private final class OnlineJob {
+    private final List<Player> players = new java.util.ArrayList<>(Bukkit.getOnlinePlayers());
+    private int playerIndex = 0;
+    private Player current;
+    private Iterator<Advancement> advancements;
+
+    /** @return true when the whole roster has been covered. */
+    boolean step(long deadlineNanos) {
+      int visited = 0;
+      while (System.nanoTime() < deadlineNanos) {
+        if (current == null) {
+          if (playerIndex >= players.size()) return true;
+          current = players.get(playerIndex++);
+          advancements = Bukkit.advancementIterator();
+        }
+        if (!advancements.hasNext()) {
+          current = null;
+          advancements = null;
+          continue;
+        }
+        Advancement advancement = advancements.next();
+        if (advancement.getDisplay() == null) continue;
+        Player owner = current;
+        try {
+          collectOne(owner, advancement);
+        } catch (Exception ex) {
+          log.log(Level.FINE, "Achievement read failed for " + owner.getName(), ex);
+        }
+        if (++visited >= 64) return false;
+      }
+      return false;
     }
   }
 
@@ -272,31 +403,19 @@ public final class AchievementCollector implements Listener {
    * done/criteria state (with epoch-millis timestamps) to this file for every
    * player, so offline progress can be recovered from here. Shares the same
    * in-memory signatures as the online scan, so the two never double-enqueue.
+   *
+   * <p>All Bukkit access (world folder, catalog, names) is resolved on the main
+   * thread first; the file walk itself is pure IO on this async task.
    */
   public void scanOffline() {
     RemoteConfig cfg = config.get();
     if (!cfg.collectorEnabled("achievements")) return;
-    if (!scanning.compareAndSet(false, true)) return;
+    if (!offlineScanning.compareAndSet(false, true)) return;
     try {
-      File worldFolder = Bukkit.getWorlds().stream().findFirst()
-          .map(w -> w.getWorldFolder()).orElse(null);
-      if (worldFolder == null) return;
-      File advDir = new File(worldFolder, "advancements");
+      OfflineContext context = offlineContext();
+      if (context == null) return;
+      File advDir = new File(context.worldFolder, "advancements");
       if (!advDir.isDirectory()) return;
-
-      Map<String, List<String>> critNamesByKey = new HashMap<>();
-      Map<String, Integer> totals = new HashMap<>();
-      Map<String, Integer> minByKey = new HashMap<>();
-      Iterator<Advancement> it = Bukkit.advancementIterator();
-      while (it.hasNext()) {
-        Advancement advancement = it.next();
-        if (advancement.getDisplay() == null) continue;
-        String key = advancement.getKey().toString();
-        List<String> names = new java.util.ArrayList<>(advancement.getCriteria());
-        critNamesByKey.put(key, names);
-        totals.put(key, names.size());
-        minByKey.put(key, minCriteria(advancement));
-      }
 
       File[] files = advDir.listFiles();
       if (files == null) return;
@@ -306,16 +425,9 @@ public final class AchievementCollector implements Listener {
         String name = file.getName();
         if (!name.endsWith(".json")) continue;
         String playerId = name.substring(0, name.length() - 5);
-        UUID uuid;
+        if (context.usernames == null || !context.usernames.containsKey(playerId)) continue;
         try {
-          uuid = UUID.fromString(playerId);
-        } catch (Exception e) {
-          continue;
-        }
-        org.bukkit.OfflinePlayer player = Bukkit.getOfflinePlayer(uuid);
-        if (player.getName() == null) continue;
-        try {
-          changed += collectOfflineFile(playerId, file, critNamesByKey, totals, minByKey);
+          changed += collectOfflineFile(playerId, file, context.criteria, context.totals, context.mins);
           players++;
         } catch (Exception ex) {
           log.log(Level.WARNING, "Offline achievement scan failed for " + playerId, ex);
@@ -327,8 +439,45 @@ public final class AchievementCollector implements Listener {
             + changed + " changed (total files " + files.length + ").");
       }
     } finally {
-      scanning.set(false);
+      offlineScanning.set(false);
     }
+  }
+
+  private record OfflineContext(File worldFolder,
+      Map<String, List<String>> criteria,
+      Map<String, Integer> totals,
+      Map<String, Integer> mins,
+      Map<String, String> usernames) {
+  }
+
+  /**
+   * Resolves everything the async offline walk needs on the main thread: the
+   * world folder, a copy of the catalog maps, and the id -> name mapping.
+   */
+  private OfflineContext offlineContext() {
+    if (Bukkit.isPrimaryThread()) return buildOfflineContext();
+    try {
+      return Bukkit.getScheduler().callSyncMethod(plugin, this::buildOfflineContext)
+          .get(10, java.util.concurrent.TimeUnit.SECONDS);
+    } catch (Exception e) {
+      log.fine("Offline scan skipped (main-thread context unavailable): " + e.getMessage());
+      return null;
+    }
+  }
+
+  private OfflineContext buildOfflineContext() {
+    File worldFolder = Bukkit.getWorlds().stream()
+        .findFirst()
+        .map(w -> w.getWorldFolder())
+        .orElse(null);
+    if (worldFolder == null) return null;
+    Map<String, String> usernames = new java.util.HashMap<>();
+    for (org.bukkit.OfflinePlayer offline : Bukkit.getOfflinePlayers()) {
+      String name = offline.getName();
+      if (name != null) usernames.put(offline.getUniqueId().toString(), name);
+    }
+    return new OfflineContext(worldFolder,
+        new HashMap<>(critNamesByKey), new HashMap<>(critTotals), new HashMap<>(critMin), usernames);
   }
 
   private int collectOfflineFile(String playerId, File file,
@@ -437,7 +586,7 @@ public final class AchievementCollector implements Listener {
   /** Best-effort timestamp from any plausible criterion value shape seen across
    *  MC save formats: number, numeric string, or an object with a numeric
    *  "time"-ish leaf. Returns 0 when no timestamp can be read. */
-  private static long readCriterionTimestamp(JsonElement el) {
+  static long readCriterionTimestamp(JsonElement el) {
     if (el == null) return 0L;
     if (el.isJsonPrimitive()) {
       com.google.gson.JsonPrimitive p = el.getAsJsonPrimitive();
@@ -451,9 +600,14 @@ public final class AchievementCollector implements Listener {
           // fall through to datetime shapes
         }
         for (String pat : new String[]{"yyyy-MM-dd HH:mm:ss Z", "yyyy-MM-dd HH:mm:ss z",
-            "yyyy-MM-dd HH:mm:ss.SSS Z", "yyyy-MM-dd HH:mm:ss"}) {
+            "yyyy-MM-dd HH:mm:ss.SSS Z", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd HH:mm:ss"}) {
           try {
-            return new java.text.SimpleDateFormat(pat).parse(s).getTime();
+            // Explicit UTC: a zone-less timestamp in a save file must not be
+            // reinterpreted by whatever timezone the server happens to run in.
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat(pat, java.util.Locale.ROOT);
+            fmt.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            return fmt.parse(s).getTime();
           } catch (Exception ignored) {
             // try the next pattern
           }
@@ -464,7 +618,7 @@ public final class AchievementCollector implements Listener {
     }
     if (el.isJsonObject()) {
       JsonObject o = el.getAsJsonObject();
-      for (String key : new String[]{"time", "ts", "timestamp", "date", "when"}) {
+      for (String key : new String[]{"time", "ts", "timestamp", "date", "when", "done_at", "completed_at"}) {
         if (o.has(key)) {
           long ts = readCriterionTimestamp(o.get(key));
           if (ts > 0L) return ts;
@@ -481,7 +635,7 @@ public final class AchievementCollector implements Listener {
     return 0L;
   }
 
-  private static boolean isCriterionTruthy(JsonElement el) {
+  static boolean isCriterionTruthy(JsonElement el) {
     if (el == null) return false;
     if (el.isJsonPrimitive()) {
       com.google.gson.JsonPrimitive p = el.getAsJsonPrimitive();

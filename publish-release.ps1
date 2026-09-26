@@ -3,8 +3,8 @@
 #   powershell -File publish-release.ps1 -Version 2.4.3
 #   powershell -File publish-release.ps1 -Version 2.4.3 -SiteRepo C:\path\to\miaucraft
 #
-# Bumps pom.xml to the version, builds, copies the jar to releases/,
-# and writes plugin-update.json pointing at the raw GitHub URL.
+# Bumps pom.xml to the version, builds (tests included), copies the jar to
+# releases/, and writes plugin-update.json pointing at the raw GitHub URL.
 #
 # Commit and push these paths afterwards so deployed servers can fetch this
 # exact version (their self-updater checks .../plugin-update.json):
@@ -18,7 +18,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$Version,
   [string]$BaseUrl = "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main",
-  [string]$SiteRepo = ""
+  [string]$SiteRepo = "",
+  [switch]$NoTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,10 @@ $ErrorActionPreference = "Stop"
 function WriteNoBom([string]$Path, [string]$Text) {
   $utf8 = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($Path, $Text, $utf8)
+}
+
+if ($Version -notmatch '^\d+(\.\d+)*$') {
+  throw "Version '$Version' is not a dotted numeric release (e.g. 2.4.3)."
 }
 
 $scriptRoot = $PSScriptRoot
@@ -43,14 +48,57 @@ Write-Host "pom.xml -> $Version"
 
 Push-Location $pluginRoot
 try {
-  & mvn -q -DskipTests package
-  if ($LASTEXITCODE -ne 0) { throw "Maven build failed." }
+  # Tests run here on purpose: the release script is the only place a broken
+  # build would otherwise be published from.
+  #
+  # Maven, and the log output of the tests it runs, write to stderr routinely
+  # without failing anything. With $ErrorActionPreference = "Stop" that aborts
+  # the release (PowerShell turns native stderr into a terminating error), so
+  # the build runs through Start-Process with redirected streams and only the
+  # exit code decides whether it succeeded.
+  $mvnArgs = @("-B", "-q")
+  if ($NoTests) { $mvnArgs += "-DskipTests" }
+  $mvnArgs += "package"
+  $mvnOutLog = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-mvn-" + [System.IO.Path]::GetRandomFileName())
+  $mvnErrLog = "$mvnOutLog.err"
+  $mvn = if (Get-Command mvn.cmd -ErrorAction SilentlyContinue) { "mvn.cmd" } else { "mvn" }
+  $proc = Start-Process -FilePath $mvn -ArgumentList $mvnArgs -WorkingDirectory $pluginRoot `
+    -NoNewWindow -Wait -PassThru -RedirectStandardOutput $mvnOutLog -RedirectStandardError $mvnErrLog
+  $mvnExit = $proc.ExitCode
+  if ($mvnExit -ne 0) {
+    Get-Content -LiteralPath $mvnOutLog, $mvnErrLog -ErrorAction SilentlyContinue |
+      ForEach-Object { Write-Host "$_" }
+    # Leave the tree as it was found: a failed release must not leave pom.xml
+    # bumped to a version that was never published.
+    WriteNoBom -Path $pom -Text $pomText
+    throw "Maven build failed (exit $mvnExit); pom.xml restored to the previous version."
+  }
+  Remove-Item -LiteralPath $mvnOutLog, $mvnErrLog -Force -ErrorAction SilentlyContinue
 } finally {
   Pop-Location
 }
 
 $built = Join-Path $pluginRoot "target\miaucraft-bridge-plugin.jar"
 if (-not (Test-Path -LiteralPath $built)) { throw "Build output not found at $built" }
+
+# The self-updater reads plugin.yml from inside the jar and refuses a jar whose
+# version does not match the manifest, so check the built artifact here instead
+# of failing in every server's log.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::OpenRead($built)
+try {
+  $entry = $zip.GetEntry("plugin.yml")
+  if ($null -eq $entry) { throw "Built jar has no plugin.yml" }
+  $reader = New-Object System.IO.StreamReader($entry.Open())
+  try { $jarPluginYml = $reader.ReadToEnd() } finally { $reader.Dispose() }
+} finally {
+  $zip.Dispose()
+}
+$versionPattern = '(?m)^version:\s*["'']?([^"''\r\n]+)["'']?\s*$'
+if ($jarPluginYml -notmatch $versionPattern) { throw "Built jar's plugin.yml has no version" }
+if ($Matches[1].Trim() -ne $Version) {
+  throw ("Built jar's plugin.yml says '$($Matches[1].Trim())' but -Version is '$Version'.")
+}
 
 $releasesDir = Join-Path $scriptRoot "releases"
 New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
@@ -67,6 +115,13 @@ $manifest = [ordered]@{
 }
 $json = $manifest | ConvertTo-Json
 WriteNoBom -Path (Join-Path $scriptRoot "plugin-update.json") -Text $json
+
+# Fail loudly here rather than in every server's log: the updater refuses a
+# manifest without a digest, so shipping a malformed one bricks auto-update.
+$written = Get-Content -LiteralPath (Join-Path $scriptRoot "plugin-update.json") -Raw | ConvertFrom-Json
+if ($written.version -ne $Version) { throw "plugin-update.json has the wrong version" }
+if ($written.sha256 -ne $sha) { throw "plugin-update.json has the wrong sha256" }
+if (-not $written.url.StartsWith("https://")) { throw "plugin-update.json url must be https" }
 
 Write-Host ""
 Write-Host "Released $name ($sha)"
@@ -86,4 +141,5 @@ if ($SiteRepo -ne "") {
   Write-Host "Mirrored the 3 shim files into $shimDir. Commit and push there so"
   Write-Host "already-deployed servers (which still poll the old repo path) see this update:"
   Write-Host "  cd $SiteRepo"
-  Write-Host "  git add bridge && git commit -m \"shim v$Version\" && git push"
+  Write-Host ('  git add bridge && git commit -m "shim v{0}" && git push' -f $Version)
+}

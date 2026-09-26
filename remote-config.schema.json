@@ -6,7 +6,12 @@
   "additionalProperties": false,
   "required": ["version", "collectors"],
   "properties": {
-    "version": { "type": "integer", "description": "Config schema version. The plugin refuses to apply a config with a newer version it does not understand." },
+    "$schema": {
+      "type": "string",
+      "description": "Editor-only pointer to this schema. Ignored by the plugin."
+    },
+    "version": { "type": "integer", "minimum": 1, "description": "Config schema version. The plugin refuses to apply a config with a newer version it does not understand." },
+    "enabled": { "type": "boolean", "description": "Remote master switch. false stops every collector without a restart (the local config.yml kill switch still wins)." },
     "log": {
       "type": "object",
       "additionalProperties": false,
@@ -47,7 +52,7 @@
           "additionalProperties": false,
           "properties": {
             "enabled": { "type": "boolean" },
-            "min-update-seconds": { "type": "integer", "minimum": 2 },
+            "min-update-seconds": { "type": "integer", "minimum": 1 },
             "cleanup-disabled-seconds": { "type": "integer", "minimum": 5 }
           }
         },
@@ -76,13 +81,22 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "catalog-sync": { "type": "boolean" },
-            "progress-scan-seconds": { "type": "integer", "minimum": 10 }
+            "progress-scan-seconds": { "type": "integer", "minimum": 10, "description": "How often online players' progress is queued for a scan. The scan itself is spread over ticks." },
+            "offline-scan-seconds": { "type": "integer", "minimum": 30, "description": "How often the on-disk advancement files are read for offline players." }
           }
         },
         "status": {
           "type": "object",
           "additionalProperties": false,
           "properties": { "enabled": { "type": "boolean" } }
+        },
+        "tps": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "sample-seconds": { "type": "integer", "minimum": 5 }
+          }
         },
         "whitelist": {
           "type": "object",
@@ -99,6 +113,7 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "web-poll-seconds": { "type": "integer", "minimum": 2 },
+            "max-length": { "type": "integer", "minimum": 32, "maximum": 4000, "description": "Longest stored chat message; longer messages are clipped." },
             "relay-to-players": { "type": "boolean" },
             "web-prefix": { "type": "string", "description": "Text before each relayed website message. Edit + push to change the format live." },
             "web-prefix-color": { "type": "string", "description": "Named colour (aqua, dark_gray, ...) or hex (#55ffdd) for web-prefix. Empty = aqua." },

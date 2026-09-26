@@ -12,9 +12,11 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
@@ -50,6 +52,8 @@ public final class LivePositionTracker implements Listener {
   private final Map<UUID, Long> lastWriteMs = new ConcurrentHashMap<>();
   private final Map<UUID, PosSnapshot> lastWrittenPos = new ConcurrentHashMap<>();
   private final Set<UUID> trackingDisabled = ConcurrentHashMap.newKeySet();
+  private final List<CompletableFuture<Void>> inFlightDeletes =
+      java.util.Collections.synchronizedList(new java.util.ArrayList<>());
   private long lastTrackingRefreshMs = 0L;
 
   public LivePositionTracker(SinkManager sinks, SupabaseRest rest, Supplier<RemoteConfig> config, Logger log) {
@@ -121,8 +125,22 @@ public final class LivePositionTracker implements Listener {
   }
 
   private void deletePosition(UUID uid) {
-    rest.delete("live_positions", "live_positions", "player_id=eq." + uid)
-        .exceptionally(err -> null);
+    // A queued upsert for the same player would be flushed after this delete
+    // and resurrect the row, so the pending write is dropped first.
+    sinks.discardPending("live_positions", keyPrefix(uid));
+    // ...and if that row is already on the wire, the delete has to be ordered
+    // behind it: flush() returns the running flush (or completes immediately
+    // when the queue is empty), so the delete can never overtake the write.
+    CompletableFuture<Void> ordered = sinks.sink("live_positions", "player_id", true, "player_id")
+        .flush()
+        .handle((ignored, err) -> null);
+    inFlightDeletes.add(ordered.thenCompose(v ->
+        rest.delete("live_positions", "live_positions", "player_id=eq." + uid)
+            .handle((res, err) -> null)));
+  }
+
+  private static String keyPrefix(UUID uid) {
+    return uid + "\u0000";
   }
 
   /** Periodic maintenance tick (also used as the tracking-refresh cadence). */
@@ -164,14 +182,35 @@ public final class LivePositionTracker implements Listener {
   }
 
   /** Removes every online player's marker in one request on plugin disable. */
-  public void shutdown() {
+  public CompletableFuture<Void> shutdown() {
     StringBuilder ids = new StringBuilder();
     for (Player p : Bukkit.getOnlinePlayers()) {
       if (ids.length() > 0) ids.append(',');
       ids.append(p.getUniqueId());
+      sinks.discardPending("live_positions", keyPrefix(p.getUniqueId()));
     }
-    if (ids.length() == 0) return;
-    rest.delete("live_positions", "live_positions", "player_id=in.(" + ids + ")")
-        .exceptionally(err -> null);
+    if (ids.length() == 0) return drainDeletes();
+    // Ordered behind the queue so a position write that is already in flight
+    // cannot land after this delete and leave a player online forever.
+    CompletableFuture<Void> ordered = sinks.sink("live_positions", "player_id", true, "player_id")
+        .flush()
+        .handle((ignored, err) -> null);
+    inFlightDeletes.add(ordered.thenCompose(v ->
+        rest.delete("live_positions", "live_positions", "player_id=in.(" + ids + ")")
+            .handle((res, err) -> null)));
+    return drainDeletes();
+  }
+
+  /**
+   * Waits for the quit/opt-out deletes so shutdown cannot exit while one of
+   * them is still in flight (which used to leave stale online markers behind).
+   */
+  private CompletableFuture<Void> drainDeletes() {
+    CompletableFuture<?>[] snapshot;
+    synchronized (inFlightDeletes) {
+      snapshot = inFlightDeletes.toArray(new CompletableFuture<?>[0]);
+      inFlightDeletes.clear();
+    }
+    return CompletableFuture.allOf(snapshot);
   }
 }

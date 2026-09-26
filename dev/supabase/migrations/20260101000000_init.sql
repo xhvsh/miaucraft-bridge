@@ -110,10 +110,18 @@ create table if not exists public.whitelist_commands (
   action        text not null check (action in ('add', 'remove')),
   username      text not null,
   requested_by  uuid,
-  status        text not null default 'pending' check (status in ('pending', 'done', 'failed')),
+  status        text not null default 'pending' check (status in ('pending', 'processing', 'done', 'failed')),
   requested_at  timestamptz not null default now(),
-  processed_at  timestamptz
+  processed_at  timestamptz,
+  -- 'processing' + these two columns are how a server claims a row before it
+  -- runs the console command, so two servers cannot apply the same request.
+  claimed_at    timestamptz,
+  claimed_by    text,
+  error         text
 );
+create index if not exists whitelist_commands_pending_idx
+  on public.whitelist_commands (requested_at)
+  where status = 'pending';
 
 -- =====================================================================
 -- chat

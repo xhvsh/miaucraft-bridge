@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -42,6 +43,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private Path remoteCachePath;
   private JsonObject overrides;
   private boolean masterEnabled;
+  private String restSchema = "public";
 
   private SupabaseRest rest;
   private SinkManager sinks;
@@ -61,6 +63,15 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private ChatBridge chat;
 
   private volatile boolean firstConfigApplied = false;
+
+  /** Bumped per fetch so a slow/older response can never overwrite a newer one. */
+  private final java.util.concurrent.atomic.AtomicLong remoteGeneration =
+      new java.util.concurrent.atomic.AtomicLong();
+
+  /** The local config.yml "enabled" kill switch, read live through this method. */
+  private boolean masterEnabled() {
+    return masterEnabled;
+  }
 
   @Override
   public void onEnable() {
@@ -85,17 +96,24 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     rest = new SupabaseRest(url, key, schema, getLogger());
     int maxBatch = Math.max(1, getConfig().getInt("max-batch-size", 300));
     sinks = new SinkManager(rest, maxBatch, getLogger());
-    sinks.setEnabled(() -> masterEnabled);
+    // One stable supplier for the whole plugin: every collector, queue and REST
+    // call reads config.yml "enabled" through it, so flipping it to false is a
+    // real kill switch (no new rows are queued or sent, in-flight queues stop).
+    BooleanSupplier masterGate = () -> masterEnabled;
+    rest.setEnabled(masterGate);
+    sinks.setEnabled(masterGate);
     state = new PersistedState(getDataFolder().toPath().resolve("bridge-state.json"), getLogger());
 
     Supplier<RemoteConfig> cfg = () -> remoteConfig;
     remoteConfig = RemoteConfig.fromJson(null, overrides);
+    remoteConfig.setMasterEnabled(masterGate);
+    restSchema = schema;
 
     chat = new ChatBridge(this, sinks, rest, state, cfg, getLogger());
     presence = new PresenceTracker(sinks, cfg, chat);
     positions = new LivePositionTracker(sinks, rest, cfg, getLogger());
-    stats = new StatCollector(sinks, state, cfg, getLogger());
-    achievements = new AchievementCollector(sinks, state, cfg, getLogger());
+    stats = new StatCollector(this, sinks, state, cfg, getLogger());
+    achievements = new AchievementCollector(this, sinks, state, cfg, getLogger());
     status = new ServerStatusCollector(sinks, cfg);
     tps = new TpsSampler(sinks, cfg);
     whitelist = new WhitelistSync(this, sinks, rest, state, cfg, getLogger());
@@ -143,6 +161,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    // Stop producing new work first, so the drain below sees a quiet queue.
     cancelTasks();
     if (updateTask != null) {
       try {
@@ -155,9 +174,12 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
     try {
       presence.shutdown();
-      positions.shutdown();
+      // The online-status marker must be published before the queued rows.
       chat.notice("Server offline");
-      sinks.flushAll().get(5, TimeUnit.SECONDS);
+      sinks.flushAll().get(8, TimeUnit.SECONDS);
+      // ...and only then remove the live markers, so a pending upsert can never
+      // be flushed after its own delete (which used to leave players "online").
+      positions.shutdown().get(5, TimeUnit.SECONDS);
       state.save();
     } catch (Exception e) {
       getLogger().warning("Shutdown flush incomplete: " + e.getMessage());
@@ -175,7 +197,16 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       state.save();
     }, 100L, 100L));
 
-    tasks.add(Bukkit.getScheduler().runTaskTimer(this, presence::heartbeatTick, 200L, 1200L));
+    // Advances the armed achievement scan in small main-thread slices.
+    tasks.add(Bukkit.getScheduler().runTaskTimer(this, achievements::pumpOnlineScan, 40L, 5L));
+
+    // Arms the online progress scan. scanOnline() only flips a flag (the roster
+    // is snapshotted by the pump above on the main thread), so it is safe here.
+    long achProgress = Math.max(1, cfg.collectorLong("achievements", "progress-scan-seconds", 60)) * 20L;
+    tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, achievements::scanOnline, 600L, achProgress));
+
+    long heartbeatPeriod = Math.max(30, cfg.collectorLong("presence", "heartbeat-seconds", 300)) * 20L;
+    tasks.add(Bukkit.getScheduler().runTaskTimer(this, presence::heartbeatTick, 200L, heartbeatPeriod));
 
     long posPeriod = Math.max(1, cfg.collectorLong("positions", "min-update-seconds", 3)) * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimer(this, positions::tick, 40L, posPeriod));
@@ -187,16 +218,13 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     tasks.add(Bukkit.getScheduler().runTaskTimer(this, tps::sample, tpsPeriod, tpsPeriod));
 
     long wlPoll = Math.max(2, cfg.collectorLong("whitelist", "command-poll-seconds", 4)) * 20L;
-    tasks.add(Bukkit.getScheduler().runTaskTimer(this, whitelist::pollCommands, 60L, wlPoll));
+    tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, whitelist::pollCommands, 60L, wlPoll));
 
     long wlMirror = Math.max(15, cfg.collectorLong("whitelist", "mirror-seconds", 120)) * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimer(this, whitelist::mirror, 100L, wlMirror));
 
     long chatPoll = Math.max(2, cfg.collectorLong("chat", "web-poll-seconds", 4)) * 20L;
-    tasks.add(Bukkit.getScheduler().runTaskTimer(this, chat::poll, 80L, chatPoll));
-
-    long achScan = Math.max(10, cfg.collectorLong("achievements", "progress-scan-seconds", 30)) * 20L;
-    tasks.add(Bukkit.getScheduler().runTaskTimer(this, achievements::scanOnline, 200L, achScan));
+    tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, chat::poll, 80L, chatPoll));
 
     long achOffline = Math.max(30, cfg.collectorLong("achievements", "offline-scan-seconds", 900)) * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, achievements::scanOffline, 600L, achOffline));
@@ -227,9 +255,9 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       updateTask = null;
     }
     if (updater == null || !updater.isEnabled()) return;
-    RemoteConfig cfg = remoteConfig;
-    long periodSecs = cfg != null ? cfg.longVal("update.check-seconds", 90)
-        : getConfig().getLong("update.check-seconds", 90);
+    // update.* is local config on purpose (a remote config must not be able to
+    // start or retune the self-updater), so the remote document is not consulted.
+    long periodSecs = getConfig().getLong("update.check-seconds", 90);
     long period = Math.max(20, periodSecs) * 20L;
     updateTask = Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::updateTick, 200L, period);
   }
@@ -251,8 +279,17 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   }
 
   private void pollRemote() {
-    RemoteConfig.fetch(remoteUrl, overrides, remoteCachePath, getLogger())
-        .thenAccept(cfg -> Bukkit.getScheduler().runTask(this, () -> applyConfig(cfg)));
+    fetchRemote().thenAccept(cfg -> Bukkit.getScheduler().runTask(this, () -> {
+      if (cfg.generation() != remoteGeneration.get()) return;
+      applyConfig(cfg);
+    }));
+  }
+
+  /** Starts a fetch tagged with the generation that is allowed to apply it. */
+  private java.util.concurrent.CompletableFuture<RemoteConfig> fetchRemote() {
+    long generation = remoteGeneration.incrementAndGet();
+    return RemoteConfig.fetch(remoteUrl, overrides, remoteCachePath, getLogger(), this::masterEnabled)
+        .thenApply(cfg -> cfg.withGeneration(generation));
   }
 
   private void applyConfig(RemoteConfig cfg) {
@@ -263,8 +300,11 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       sinks.flushAll();
       chat.notice("Server online");
     }
-    rescheduleTasks();
-    scheduleUpdateChecks();
+    // Re-scheduling on every poll restarted the long-period timers (the
+    // 15-minute reconcile never reached its first run). Only rebuild tasks
+    // when a value that is actually baked into them changed.
+    rescheduleTasksIfChanged();
+    scheduleUpdateChecksIfChanged();
     if (cfg.version() > 0) {
       // The first-tick catalog sync cannot run (remote config not loaded yet),
       // so re-publish the catalog whenever a real config is applied.
@@ -276,6 +316,43 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     }
   }
 
+  private String scheduleFingerprint;
+
+  /** Every scheduling input, in one comparable string. */
+  private String scheduleFingerprint() {
+    RemoteConfig cfg = remoteConfig;
+    if (cfg == null) return "";
+    return String.join("|",
+        String.valueOf(cfg.collectorLong("presence", "heartbeat-seconds", 300)),
+        String.valueOf(cfg.collectorLong("positions", "min-update-seconds", 3)),
+        String.valueOf(cfg.longVal("status.heartbeat-seconds", 25)),
+        String.valueOf(cfg.collectorLong("tps", "sample-seconds", 10)),
+        String.valueOf(cfg.collectorLong("whitelist", "command-poll-seconds", 4)),
+        String.valueOf(cfg.collectorLong("whitelist", "mirror-seconds", 120)),
+        String.valueOf(cfg.collectorLong("chat", "web-poll-seconds", 4)),
+        String.valueOf(cfg.collectorLong("achievements", "offline-scan-seconds", 900)),
+        String.valueOf(cfg.collectorLong("achievements", "progress-scan-seconds", 60)),
+        String.valueOf(cfg.collectorLong("stats", "reconcile-minutes", 15)));
+  }
+
+  private void rescheduleTasksIfChanged() {
+    String fingerprint = scheduleFingerprint();
+    if (fingerprint.equals(scheduleFingerprint)) return;
+    scheduleFingerprint = fingerprint;
+    rescheduleTasks();
+  }
+
+  private String updateFingerprint;
+
+  private void scheduleUpdateChecksIfChanged() {
+    long periodSecs = getConfig().getLong("update.check-seconds", 90);
+    boolean on = updater != null && updater.isEnabled();
+    String fingerprint = on + "@" + Math.max(20, periodSecs);
+    if (fingerprint.equals(updateFingerprint)) return;
+    updateFingerprint = fingerprint;
+    scheduleUpdateChecks();
+  }
+
   // ---------------------------------------------------------------- commands
 
   /** The jar this plugin was loaded from (JavaPlugin#getFile is protected). */
@@ -285,13 +362,16 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
   public void reloadRemote(CommandSender sender) {
     sender.sendMessage("§e[MiaucraftBridge] Re-fetching remote config...");
-    RemoteConfig.fetch(remoteUrl, overrides, remoteCachePath, getLogger())
-        .thenAccept(cfg -> Bukkit.getScheduler().runTask(this, () -> {
-          applyConfig(cfg);
-          sender.sendMessage("§a[MiaucraftBridge] Remote config v" + cfg.version()
-              + " applied (" + cfg.source() + ").");
-          resyncAchievementsCatalog(sender);
-        }));
+    fetchRemote().thenAccept(cfg -> Bukkit.getScheduler().runTask(this, () -> {
+      if (cfg.generation() != remoteGeneration.get()) {
+        sender.sendMessage("§c[MiaucraftBridge] A newer fetch already landed - this one was ignored.");
+        return;
+      }
+      applyConfig(cfg);
+      sender.sendMessage("§a[MiaucraftBridge] Remote config v" + cfg.version()
+          + " applied (" + cfg.source() + ").");
+      resyncAchievementsCatalog(sender);
+    }));
   }
 
   /** Re-publishes the static achievement catalog so schema/code changes land without a reboot. */
@@ -350,6 +430,8 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     lines.add("§7remote: §f" + remoteUrl);
     lines.add("§7config: §f" + (cfg.version() > 0 ? "v" + cfg.version() + " (" + cfg.source() + ")" : "not loaded"));
     lines.add("§7master enabled: §f" + masterEnabled);
+    lines.add("§7supabase: §f" + restSchema + " §7(bridge traffic "
+        + (rest.isEnabled() ? "§aon" : "§coff") + "§7)");
     lines.add("§7collectors: §f" + collectorSummary(cfg));
     lines.add("§7stat reconcile: §f" + (stats.isRunning() ? "running" : "idle"));
     lines.add("§7last whitelist mirror: §f" + ago(whitelist.lastMirrorMs()));
