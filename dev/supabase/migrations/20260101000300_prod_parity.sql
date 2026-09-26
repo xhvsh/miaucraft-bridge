@@ -1,28 +1,39 @@
--- MiaucraftBridge: production parity fixes.
+-- MiaucraftBridge: production fixes.
 --
--- Everything here is idempotent, so it is safe to run against a database that
--- already has some of it. Apply with:
+-- Idempotent throughout, so it is safe to run more than once. Apply with:
 --   psql "$DATABASE_URL" -f dev/supabase/migrations/20260101000300_prod_parity.sql
 -- or through `supabase db push` (dev/supabase/migrations is the migration dir).
 --
--- Fixes, grouped by what was broken:
---   1. service_role could not write player_achievements / player_achievement-
---      criteria, so every achievement insert failed with permission denied.
---   2. player_achievement* had no ON DELETE CASCADE, which blocked any
---      deletion of a players row, and delete_account_by_username left the
---      gameplay data behind.
---   3. Public read access on stats / achievements / progress / live positions
---      is intentional, so this migration asserts that posture rather than
---      revoking it. See section 4.
---   4. whitelist_commands had no 'processing' state and no claim columns, so
---      2.4.4's atomic claim failed with HTTP 400 on every pending command.
---   5. No retention: chat, positions and TPS samples grew forever.
+-- What this fixes:
+--   1. service_role has no INSERT/UPDATE on player_achievements or
+--      player_achievement_criteria, so every achievement write the plugin
+--      attempts is rejected. This is the only live breakage here.
+--   2. No retention, so chat_messages and server_tps_samples grow forever.
+--      The purge function is created but NOT scheduled - see section 4.
 --
--- The whitelist itself is the one table kept private, and stays that way.
+-- What this deliberately does NOT change:
 --
--- server_tps_samples already exists in production and matches the local
--- definition, so section 2's create is a no-op there; it is kept so the file
--- also repairs a database that never got the local migration.
+--   * Account deletion. public.delete_account_by_username already removes
+--     only website data (waypoints, whitelist_commands, logs, access_codes,
+--     profiles, auth.identities, auth.users). In-game gameplay data - players,
+--     player_stats, player_achievements, player_achievement_criteria,
+--     live_positions and chat_messages - is keyed by Minecraft uuid, not by the
+--     website account, and must survive deletion of that account. An earlier
+--     draft of this file replaced the function with one that also deleted
+--     gameplay rows and added ON DELETE CASCADE to the achievement tables.
+--     Both were reverted: a website account deletion must never wipe in-game
+--     statistics or achievements, and the missing CASCADE is harmless because
+--     nothing deletes a players row.
+--
+--   * Public read access. player_stats, player_achievements,
+--     player_achievement_criteria, live_positions, achievements,
+--     achievement_criteria and players are world-readable on purpose. The
+--     leaderboard, stat pages, achievement menu and live map are public pages
+--     and must render for a logged-out visitor. Section 3 re-asserts that
+--     posture rather than tightening it.
+--
+--   * The whitelist. It stays private: anon has no SELECT and the only policy
+--     requires an authenticated caller whose profiles.role is 'owner'.
 
 -- ---------------------------------------------------------------------------
 -- 1. service_role write grants for every table the plugin writes
@@ -48,16 +59,21 @@ grant usage, select on all sequences in schema public to service_role;
 
 -- The whitelist stays private. Production already grants anon no SELECT here
 -- and the only policy is owner-scoped, so this is a defensive no-op that also
--- cleans up the stray REFERENCES/TRIGGER/TRUNCATE/MAINTAIN anon grants.
---
--- Everything else the website reads is deliberately world-readable - stats,
--- achievements, achievement progress and live positions are all public pages,
--- and an earlier draft of this migration wrongly locked them to signed-in
--- users. Section 4 below now asserts the public posture instead of revoking it.
+-- clears the stray REFERENCES/TRIGGER/TRUNCATE/MAINTAIN anon grants.
 revoke select on table public.whitelist from anon;
 
+-- Account deletion is owner-only. The function body re-checks the role, but
+-- revoking the default PUBLIC execute means the entry point is not exposed to
+-- anon at all. The website calls it as `authenticated`, so this is transparent.
+revoke all on function public.delete_account_by_username(text) from public;
+grant all on function public.delete_account_by_username(text) to authenticated;
+
 -- ---------------------------------------------------------------------------
--- 2. server_tps_samples (the plugin appends a sample every few seconds)
+-- 2. server_tps_samples
+--
+-- The plugin appends a sample every few seconds. Present and correct in
+-- production; created here so the file also repairs a database that never got
+-- the local migration. Reads stay world-readable for the TPS chart.
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.server_tps_samples (
@@ -99,100 +115,11 @@ $$;
 grant execute on function public.get_tps_series(int, int) to anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- 3. Gameplay rows must follow the player (and the account) being deleted
--- ---------------------------------------------------------------------------
-
-alter table public.player_achievements
-  drop constraint if exists player_achievements_player_id_fkey;
-alter table public.player_achievements
-  add constraint player_achievements_player_id_fkey
-  foreign key (player_id) references public.players(id) on delete cascade;
-
-alter table public.player_achievement_criteria
-  drop constraint if exists player_achievement_criteria_player_id_fkey;
-alter table public.player_achievement_criteria
-  add constraint player_achievement_criteria_player_id_fkey
-  foreign key (player_id) references public.players(id) on delete cascade;
-
--- Chat is keyed by user_id (set null on delete) but a player's own messages
--- are also identified by username; keep the FK behaviour and add an index so
--- the account cleanup below stays cheap.
-create index if not exists chat_messages_username_idx
-  on public.chat_messages (username);
-create index if not exists live_positions_updated_at_idx
-  on public.live_positions (updated_at);
-create index if not exists player_achievements_player_id_idx
-  on public.player_achievements (player_id);
-
-create or replace function public.delete_account_by_username(_username text) RETURNS jsonb
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO ''
-    AS $$
-declare
-  caller_id   uuid;
-  caller_role text;
-  target_id   uuid;
-  target_player uuid;
-begin
-  select auth.uid() into caller_id;
-  if caller_id is null then
-    return jsonb_build_object('error', 'Not authenticated.');
-  end if;
-
-  select role into caller_role from public.profiles where id = caller_id;
-  if caller_role is null or caller_role <> 'owner' then
-    return jsonb_build_object('error', 'Only owners can delete accounts.');
-  end if;
-
-  select id into target_id from public.profiles where username = _username;
-  if target_id is null then
-    return jsonb_build_object('error', format('Account "%s" not found.', _username));
-  end if;
-
-  if target_id = caller_id then
-    return jsonb_build_object('error', 'You cannot delete your own account here; use Settings -> Delete account.');
-  end if;
-
-  delete from public.waypoints where created_by = target_id;
-  delete from public.whitelist_commands where requested_by = target_id;
-  delete from public.logs where user_id = target_id;
-  delete from public.access_codes where used_by = target_id;
-
-  -- Gameplay data is keyed by the Minecraft uuid, which is not the auth id, so
-  -- it used to survive the account deletion. The cascade removes the stats,
-  -- live position and achievement rows with it.
-  select id into target_player from public.players where lower(username) = lower(_username);
-  if target_player is not null then
-    delete from public.player_achievement_criteria where player_id = target_player;
-    delete from public.player_achievements where player_id = target_player;
-    delete from public.player_stats where player_id = target_player;
-    delete from public.live_positions where player_id = target_player;
-    delete from public.players where id = target_player;
-  end if;
-  delete from public.chat_messages where username = _username;
-
-  delete from public.profiles where id = target_id;
-  delete from auth.identities where user_id = target_id;
-  delete from auth.users where id = target_id;
-
-  return jsonb_build_object('ok', true);
-end;
-$$;
-
-grant all on function public.delete_account_by_username(text) to authenticated;
--- SECURITY DEFINER with the default PUBLIC execute would let any role call it
--- (the body re-checks the role, but there is no reason to expose it at all).
-revoke all on function public.delete_account_by_username(text) from public;
-
--- ---------------------------------------------------------------------------
--- 4. Public read access is intentional - assert it, do not revoke it
+-- 3. Public read access is intentional - assert it, do not revoke it
 --
--- stats, achievements, achievement progress and live positions are public
--- pages: the leaderboard, the per-player stat pages, the achievement menu and
--- the live map must all render for a logged-out visitor. This section makes
--- that posture explicit and idempotent, so the grants and policies are correct
+-- Makes the grants and policies explicit and idempotent, so they are correct
 -- on a fresh database, on production, and on any database where an earlier
--- draft of this migration had already locked them down.
+-- draft of this migration had already locked these tables down.
 --
 -- live_positions keeps a filter rather than a blanket read: only players who
 -- are not hidden and have live tracking enabled expose their coordinates.
@@ -203,6 +130,8 @@ grant select on table public.player_stats to anon, authenticated;
 grant select on table public.player_achievements to anon, authenticated;
 grant select on table public.player_achievement_criteria to anon, authenticated;
 grant select on table public.live_positions to anon, authenticated;
+grant select on table public.achievements to anon, authenticated;
+grant select on table public.achievement_criteria to anon, authenticated;
 
 drop policy if exists "player_stats are publicly readable" on public.player_stats;
 create policy player_stats_read
@@ -232,11 +161,6 @@ create policy live_positions_read
       AND p.hidden = false
       AND COALESCE(p.live_tracking_enabled, true)));
 
--- The achievement catalog stays world-readable too; the site needs it to
--- render the menu. Re-asserted here so a fresh database gets it as well.
-grant select on table public.achievements to anon, authenticated;
-grant select on table public.achievement_criteria to anon, authenticated;
-
 drop policy if exists "Public read access" on public.achievements;
 create policy achievements_read
   on public.achievements for select
@@ -253,34 +177,19 @@ create policy achievement_criteria_read
 -- public leaderboard reads, restricted to non-hidden players.
 
 -- ---------------------------------------------------------------------------
--- 5. Whitelist command claiming
+-- 4. Retention
+--
+-- Chat keeps 30 days, TPS samples 7 days. Live positions are not accumulated
+-- (one row per online player) but stale markers from a crashed server are, so
+-- anything older than an hour is cleared. Player chat (kind 'player') is never
+-- purged, and no gameplay table is touched.
+--
+-- This only DEFINES the function. Scheduling it is a separate, deliberate step
+-- because it deletes rows on a timer:
+--   select cron.schedule('bridge-retention', '*/15 * * * *',
+--     $$select public.purge_bridge_history()$$);
 -- ---------------------------------------------------------------------------
 
-alter table public.whitelist_commands
-  add column if not exists claimed_at timestamptz;
-alter table public.whitelist_commands
-  add column if not exists claimed_by text;
-
--- 'processing' is the state a server puts a row in while it runs the console
--- command, so two servers can never apply the same request twice. The old
--- check constraint rejected it.
-alter table public.whitelist_commands
-  drop constraint if exists whitelist_commands_status_check;
-alter table public.whitelist_commands
-  add constraint whitelist_commands_status_check
-  check (status in ('pending', 'processing', 'done', 'failed'));
-
-create index if not exists whitelist_commands_pending_idx
-  on public.whitelist_commands (requested_at)
-  where status = 'pending';
-
--- ---------------------------------------------------------------------------
--- 6. Retention
--- ---------------------------------------------------------------------------
-
--- chat_messages keeps 30 days, TPS samples 7 days. Live positions are not
--- accumulated (one row per online player) but stale markers from a crashed
--- server are, so anything older than an hour is cleared.
 create or replace function public.purge_bridge_history()
 returns jsonb
 language plpgsql
@@ -312,10 +221,7 @@ begin
 end;
 $$;
 
--- Schedule it (Supabase enables pg_cron by default):
---   select cron.schedule('bridge-retention', '*/15 * * * *',
---     $$select public.purge_bridge_history()$$);
 -- SECURITY DEFINER, so the default PUBLIC execute is revoked: only the
--- scheduler/service role may trigger a purge.
+-- scheduler or the service role may trigger a purge.
 revoke all on function public.purge_bridge_history() from public;
 grant execute on function public.purge_bridge_history() to service_role;

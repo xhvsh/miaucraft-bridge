@@ -7,17 +7,24 @@
 --
 -- Known drift this dump still shows (fixed by
 -- dev/supabase/migrations/20260101000300_prod_parity.sql):
---   * no server_tps_samples table, although the plugin writes to it,
---   * service_role lacks DML on player_achievements / player_achievement_criteria,
---   * player_achievement* have no ON DELETE CASCADE, and delete_account_by_username
---     leaves gameplay rows behind,
---   * whitelist_commands.status has no 'processing' state and no claim columns.
+--   * service_role lacks INSERT/UPDATE on player_achievements and
+--     player_achievement_criteria, so achievement writes are rejected.
 --
--- NOT drift, and must not be "fixed": player_stats, player_achievements,
--- player_achievement_criteria and live_positions are world-readable on purpose.
--- The leaderboard, the stat pages, the achievement menu and the live map are
--- public, so anon SELECT and the public select policies shown below are the
--- intended state.
+-- Already fixed in production since this dump was taken, so the dump is stale
+-- here and the lines below no longer match reality:
+--   * server_tps_samples did not exist yet,
+--   * whitelist_commands.status had no 'processing' state and no claim columns.
+--
+-- NOT drift, and must not be "fixed":
+--   * player_achievement* have no ON DELETE CASCADE. Nothing deletes a players
+--     row, and gameplay data is meant to outlive any website account deletion.
+--   * delete_account_by_username removes website data only and deliberately
+--     leaves players, player_stats, player_achievements,
+--     player_achievement_criteria, live_positions and chat_messages alone.
+--   * player_stats, player_achievements, player_achievement_criteria and
+--     live_positions are world-readable. The leaderboard, stat pages,
+--     achievement menu and live map are public, so anon SELECT and the public
+--     select policies below are the intended state.
 --
 
 \restrict FV1wXX5NeFVyd3g4nMIfXOHfb9S3ANjj2wf67Dw9xhb7j1gW4esH1A8oHCORv4h
