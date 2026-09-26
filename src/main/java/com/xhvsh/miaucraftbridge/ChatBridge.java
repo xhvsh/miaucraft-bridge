@@ -37,6 +37,10 @@ public final class ChatBridge {
   private static final int RELAY_ID_MEMORY = 500;
   private static final int DEFAULT_MAX_LENGTH = 500;
 
+  /** At least {@code yyyy-MM-ddTHH:mm}; seconds/fraction/zone are optional. */
+  private static final java.util.regex.Pattern TIMESTAMP =
+      java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2})?(\\.\\d+)?\\s*(Z|[+-]\\d{2}(:?\\d{2})?)?");
+
   private final Plugin plugin;
   private final SinkManager sinks;
   private final SupabaseRest rest;
@@ -46,6 +50,7 @@ public final class ChatBridge {
 
   private volatile boolean polling = false;
   private volatile int lastRelayed = 0;
+  private volatile long lastWarnMs = 0;
 
   public ChatBridge(Plugin plugin, SinkManager sinks, SupabaseRest rest, PersistedState state,
       Supplier<RemoteConfig> config, Logger log) {
@@ -66,8 +71,12 @@ public final class ChatBridge {
   public void onPlayerChat(AsyncChatEvent event) {
     RemoteConfig cfg = config.get();
     if (!cfg.collectorEnabled("chat")) return;
-    String message = sanitize(PlainTextComponentSerializer.plainText().serialize(event.message()),
-        cfg.collectorInt("chat", "max-length", DEFAULT_MAX_LENGTH));
+    // Deliberately the 2.4.3 line, un-sanitised: 2.4.4 ran every message
+    // through sanitize(...) + collectorInt("chat","max-length") and both the
+    // player path and notice() went silent in production on 2.4.4 while every
+    // other collector kept working. The clip is applied by the database column
+    // and by the website, which is where it belongs.
+    String message = PlainTextComponentSerializer.plainText().serialize(event.message());
     if (message.isBlank()) return;
 
     JsonObject row = new JsonObject();
@@ -83,7 +92,7 @@ public final class ChatBridge {
     if (!cfg.collectorEnabled("system-notices")) return;
     JsonObject row = new JsonObject();
     row.addProperty("kind", "system");
-    row.addProperty("message", sanitize(message, DEFAULT_MAX_LENGTH));
+    row.addProperty("message", message);
     sinks.sink("chat_messages", "id", false, "id").add(row);
   }
 
@@ -124,9 +133,15 @@ public final class ChatBridge {
 
     String watermark = state.getString("chat-watermark", null);
     String lastId = state.getString("chat-last-id", null);
+    if (watermark != null && !watermark.isBlank() && !looksLikeTimestamp(watermark)) {
+      warn("discarding unusable chat watermark '" + watermark + "'; re-reading chat history once");
+      watermark = null;
+      lastId = null;
+    }
+    boolean cursor = watermark != null && !watermark.isBlank();
+
     StringBuilder query = new StringBuilder(
         "select=id,username,message,created_at&kind=eq.web&order=created_at.asc,id.asc&limit=100");
-    boolean cursor = watermark != null && !watermark.isBlank();
     if (cursor && lastId != null && !lastId.isBlank()) {
       query.append("&or=(created_at.gt.").append(SupabaseRest.encode(watermark))
           .append(",and(created_at.eq.").append(SupabaseRest.encode(watermark))
@@ -135,12 +150,57 @@ public final class ChatBridge {
       query.append("&created_at=gt.").append(SupabaseRest.encode(watermark));
     }
 
-    rest.select("chat-messages", "chat_messages", query.toString())
+    fetch(query.toString(), true);
+  }
+
+  /**
+   * Runs one poll. Failures are logged instead of dropped: the old code
+   * returned on {@code err != null} without a word, so a rejected query just
+   * froze the cursor and web chat died with nothing in the log.
+   *
+   * <p>If the keyset filter itself is the problem, one retry with the plain
+   * timestamp filter keeps the relay alive (the id memory makes re-reading the
+   * boundary timestamp harmless).
+   */
+  private void fetch(String query, boolean allowFallback) {
+    rest.select("chat-messages", "chat_messages", query)
         .whenComplete((rows, err) -> {
           polling = false;
-          if (err != null || rows == null || rows.isEmpty()) return;
+          if (err != null) {
+            String fallback = timestampQuery();
+            if (allowFallback && !fallback.equals(query)) {
+              warn("chat poll query rejected (" + err.getMessage()
+                  + "), retrying with the plain timestamp filter");
+              polling = true;
+              fetch(fallback, false);
+              return;
+            }
+            warn("chat poll failed: " + err.getMessage() + " query=" + query);
+            return;
+          }
+          if (rows == null || rows.isEmpty()) return;
+          if (!plugin.isEnabled()) return;
           Bukkit.getScheduler().runTask(plugin, () -> relay(rows));
         });
+  }
+
+  /** The pre-2.4.4 filter: everything strictly newer than the watermark. */
+  private String timestampQuery() {
+    String watermark = state.getString("chat-watermark", null);
+    StringBuilder query = new StringBuilder(
+        "select=id,username,message,created_at&kind=eq.web&order=created_at.asc,id.asc&limit=100");
+    if (watermark != null && !watermark.isBlank()) {
+      query.append("&created_at=gt.").append(SupabaseRest.encode(watermark));
+    }
+    return query.toString();
+  }
+
+  /** Rate-limited so a broken poll cannot flood the console every few seconds. */
+  private void warn(String message) {
+    long now = System.currentTimeMillis();
+    if (now - lastWarnMs < 30_000L) return;
+    lastWarnMs = now;
+    log.warning(message);
   }
 
   private void relay(JsonArray rows) {
@@ -209,6 +269,17 @@ public final class ChatBridge {
       trimRelayedIds(already);
     }
     state.save();
+  }
+
+  /**
+   * True for a value that can be used as a {@code created_at} cursor: at least
+   * {@code yyyy-MM-ddTHH:mm}, optionally followed by seconds, fraction and a
+   * zone. Anything else (a raw JSON object, a number, a truncated string) would
+   * make every poll query return HTTP 400 forever, and because the relay used
+   * to ignore errors the chat would simply be dead with no clue why.
+   */
+  static boolean looksLikeTimestamp(String value) {
+    return value != null && TIMESTAMP.matcher(value).matches();
   }
 
   /** Order by (created_at, id), the same order the query uses. */

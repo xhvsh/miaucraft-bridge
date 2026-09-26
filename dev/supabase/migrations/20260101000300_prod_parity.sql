@@ -6,16 +6,20 @@
 -- or through `supabase db push` (dev/supabase/migrations is the migration dir).
 --
 -- Fixes, grouped by what was broken:
---   1. service_role could not write player_achievements / player_achievement_
+--   1. service_role could not write player_achievements / player_achievement-
 --      criteria, so every achievement insert failed with permission denied.
---   2. server_tps_samples (written by the plugin) does not exist in the
---      production schema, so the TPS sink 404'd forever.
---   3. player_achievement* had no ON DELETE CASCADE, which blocked any
+--   2. player_achievement* had no ON DELETE CASCADE, which blocked any
 --      deletion of a players row, and account deletion never removed the
 --      gameplay data at all.
---   4. player_stats / player_achievements / player_achievement_criteria /
+--   3. player_stats / player_achievements / player_achievement_criteria /
 --      live_positions were readable by anon (i.e. the public internet).
+--   4. whitelist_commands had no 'processing' state and no claim columns, so
+--      2.4.4's atomic claim failed with HTTP 400 on every pending command.
 --   5. No retention: chat, positions and TPS samples grew forever.
+--
+-- server_tps_samples already exists in production and matches the local
+-- definition, so section 2's create is a no-op there; it is kept so the file
+-- also repairs a database that never got the local migration.
 
 -- ---------------------------------------------------------------------------
 -- 1. service_role write grants for every table the plugin writes
