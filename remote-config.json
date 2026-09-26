@@ -60,7 +60,7 @@
     "chat": {
       "enabled": true,
       "web-poll-seconds": 4,
-      "max-length": 500,
+      "max-length": 4,
       "relay-to-players": true,
       "web-prefix": "[web] ",
       "web-prefix-color": "AQUA",
