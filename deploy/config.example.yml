@@ -1,11 +1,14 @@
-# MiaucraftBridge config for the PRODUCTION server.
+# MiaucraftBridge config for the PRODUCTION server - TEMPLATE, no real key.
 #
-# Copy this file to plugins/MiaucraftBridge/config.yml on the minecraft server,
-# paste the real service-role-key below, then start/restart the server.
-# Keep the file (and its key) only on the server - never commit it.
+# Copy this to deploy/config.yml on the machine that runs the server, paste the
+# real service-role-key there, and copy that to
+# plugins/MiaucraftBridge/config.yml before starting the server.
 #
-# The plugin writes this file with blank values on first boot and then shuts
-# itself down; replacing it with this file before starting avoids that dance.
+# deploy/config.yml is gitignored precisely so a pasted key can never be
+# committed by accident. Only this .example file is tracked.
+#
+# The plugin writes its own config.yml with blank values on first boot and then
+# shuts itself down; replacing it before starting avoids that dance.
 
 supabase:
   url: "https://qxgpsutkthtuejjrnywg.supabase.co"

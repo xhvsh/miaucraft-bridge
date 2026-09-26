@@ -7,12 +7,22 @@ dev/server/
 # Supabase CLI local stack (contains local keys / ephemeral state)
 dev/supabase/.temp/
 dev/supabase/.branches/
+dev/supabase/volumes/
+dev/supabase/.env
+dev/supabase/seed.sql
 
 # Local runtime state written by the plugin
 **/bridge-state.json
+**/remote-config-last-good.json
 
-# Local developer config (real secrets live here, never commit)
+# Real secrets: the tracked deploy/config.example.yml is the template to copy.
+# Anything below is a pasted-in copy and must never be committed.
+deploy/config.yml
 config.local.yml
+.env
+.env.*
+*.pem
+*.key
 
 # Local dev update artifacts (the release manifest and jars live at repo root)
 dev/jars/
@@ -21,10 +31,16 @@ dev/plugin-update.json
 # OS / editor junk
 .DS_Store
 Thumbs.db
+desktop.ini
 *.iml
 .idea/
 .vscode/
+.classpath
+.project
+.settings/
 
 # Any loose log / crash dumps
 *.log
 hs_err_pid*.log
+hs_err_pid*
+replay_pid*.log
