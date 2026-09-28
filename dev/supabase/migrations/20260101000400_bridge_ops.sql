@@ -279,6 +279,7 @@ declare
   removed_pos   bigint;
   removed_ev    bigint;
   removed_con   bigint;
+  removed_cap   bigint;
   removed_cmd   bigint;
   con_total     bigint;
   con_cap       constant integer := 5000;
@@ -305,13 +306,16 @@ begin
   get diagnostics removed_con = row_count;
 
   -- Row cap, so a busy debug session cannot fill the table even inside 2 days.
+  -- GET DIAGNOSTICS only accepts a bare variable on the left, so the trim
+  -- count lands in its own variable and is added afterwards.
   select count(*) into con_total from public.bridge_console;
   if con_total > con_cap then
     delete from public.bridge_console
       where id not in (
         select id from public.bridge_console order by id desc limit con_cap
       );
-    get diagnostics removed_con = removed_con + row_count;
+    get diagnostics removed_cap = row_count;
+    removed_con := removed_con + removed_cap;
   end if;
 
   delete from public.bridge_commands
