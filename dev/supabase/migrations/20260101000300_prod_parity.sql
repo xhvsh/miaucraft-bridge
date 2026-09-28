@@ -179,10 +179,14 @@ create policy achievement_criteria_read
 -- ---------------------------------------------------------------------------
 -- 4. Retention
 --
--- Chat keeps 30 days, TPS samples 7 days. Live positions are not accumulated
--- (one row per online player) but stale markers from a crashed server are, so
--- anything older than an hour is cleared. Player chat (kind 'player') is never
--- purged, and no gameplay table is touched.
+-- Chat keeps 30 days. TPS samples keep 3 days: the server page only ever
+-- asks for 1 hour or 24 hours (get_tps_series is called with p_hours of 1 or
+-- 24), so anything past 3 days is never read. At the current 30s sample
+-- interval that is ~8,600 rows, versus ~59,000 at the old 10s interval over
+-- the same window. Live positions are not accumulated (one row per online
+-- player) but stale markers from a crashed server are, so anything older than
+-- an hour is cleared. Player chat (kind 'player') is never purged, and no
+-- gameplay table is touched.
 --
 -- This only DEFINES the function. Scheduling it is a separate, deliberate step
 -- because it deletes rows on a timer:
@@ -207,7 +211,7 @@ begin
   get diagnostics removed_chat = row_count;
 
   delete from public.server_tps_samples
-    where sampled_at < now() - interval '7 days';
+    where sampled_at < now() - interval '3 days';
   get diagnostics removed_tps = row_count;
 
   delete from public.live_positions

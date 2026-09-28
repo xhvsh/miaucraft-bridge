@@ -50,7 +50,7 @@
     },
     "tps": {
       "enabled": true,
-      "sample-seconds": 10
+      "sample-seconds": 30
     },
     "whitelist": {
       "enabled": true,
