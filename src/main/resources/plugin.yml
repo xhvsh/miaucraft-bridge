@@ -7,7 +7,7 @@ authors: [xhvsh]
 commands:
   bridge:
     description: MiaucraftBridge admin commands.
-    usage: /bridge <reload|status|test|stats|update|drain>
+    usage: /bridge <reload|status|test|stats|update|drain|flush>
     permission: miaucraftbridge.admin
   refreshstats:
     description: Forces a stats reconcile pass.

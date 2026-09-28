@@ -243,6 +243,7 @@ public final class Updater {
     markStaged(dest, version);
     lastResult = "staged v" + version + " (" + Files.size(dest) + " bytes · sha " + shortSha(dest) + ")";
     log.info("update " + lastResult + " - run /bridge update apply to install");
+    report("info", "update.staged", lastResult, version);
     return lastResult;
   }
 
@@ -418,10 +419,12 @@ public final class Updater {
   public void apply(CommandSender sender) {
     if (!hasStaged()) {
       sender.sendMessage("§c[MiaucraftBridge] No staged update - run §f/bridge update §cfirst.");
+      report("warn", "update.no_staged", "Update apply requested with nothing staged.", null);
       return;
     }
     if (!applying.compareAndSet(false, true)) {
       sender.sendMessage("§c[MiaucraftBridge] An update is already being applied.");
+      report("warn", "update.busy", "Update apply requested while one is already running.", null);
       return;
     }
     Path target = ownJar();
@@ -441,6 +444,7 @@ public final class Updater {
         sender.sendMessage("§a[MiaucraftBridge] Installed v" + version + " (sha " + stagedShaShort
             + ") - the server will restart now.");
         log.info("update " + lastResult + " (" + target + ").");
+        report("info", "update.applied", "Installed v" + version + " in place.", version);
         Bukkit.getScheduler().runTask(plugin, Bukkit::shutdown);
         return;
       }
@@ -451,13 +455,24 @@ public final class Updater {
       sender.sendMessage("§a[MiaucraftBridge] Installing v" + version + " (sha " + stagedShaShort
           + ") - the server will restart now.");
       log.info("Applying update v" + version + " (jar -> " + target + "), restarting.");
+      report("info", "update.applied", "Installing v" + version + " via the detached helper.", version);
       Bukkit.getScheduler().runTask(plugin, Bukkit::shutdown);
     } catch (Exception e) {
       applying.set(false);
       lastResult = "apply failed: " + brief(e);
       log.warning("update " + lastResult);
       sender.sendMessage("§c[MiaucraftBridge] Update apply failed: " + brief(e));
+      report("error", "update.failed", "Update apply failed: " + brief(e), version);
     }
+  }
+
+  /** Publishes an update event when diagnostics are available. */
+  private void report(String level, String event, String message, String version) {
+    BridgeOps ops = plugin.opsApi();
+    if (ops == null) return;
+    com.google.gson.JsonObject details = new com.google.gson.JsonObject();
+    if (version != null) details.addProperty("version", version);
+    ops.report(level, "update", event, message, details);
   }
 
   /**

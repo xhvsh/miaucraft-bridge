@@ -61,6 +61,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private TpsSampler tps;
   private WhitelistSync whitelist;
   private ChatBridge chat;
+  private BridgeOps ops;
 
   private volatile boolean firstConfigApplied = false;
 
@@ -118,6 +119,8 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     tps = new TpsSampler(sinks, cfg);
     whitelist = new WhitelistSync(this, sinks, rest, state, cfg, getLogger());
     updater = new Updater(this, remoteUrl);
+    ops = new BridgeOps(this);
+    ops.start();
 
     getServer().getPluginManager().registerEvents(presence, this);
     getServer().getPluginManager().registerEvents(positions, this);
@@ -157,6 +160,8 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     pollRemote();
 
     getLogger().info("Enabled - remote config from " + remoteUrl);
+    ops.info("lifecycle", "server.online", "Plugin enabled");
+    ops.writeStatus();
   }
 
   @Override
@@ -170,12 +175,16 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       }
       updateTask = null;
     }
+    if (ops != null) ops.stop();
     if (rest == null) return;
 
     try {
       presence.shutdown();
       // The online-status marker must be published before the queued rows.
       chat.notice("Server offline");
+      // Written before the flush so the shutdown event and the offline status
+      // row go out with the rest of the final batch.
+      if (ops != null) ops.markOffline();
       sinks.flushAll().get(8, TimeUnit.SECONDS);
       // ...and only then remove the live markers, so a pending upsert can never
       // be flushed after its own delete (which used to leave players "online").
@@ -234,6 +243,18 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
     long remotePoll = remotePollSeconds * 20L;
     tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::pollRemote, remotePoll, remotePoll));
+
+    if (ops != null) {
+      // Own cadence rather than a remote setting: the console mirror and the
+      // command queue are diagnostic plumbing, and a remote config must not be
+      // able to stop the server from reporting on itself.
+      tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
+        ops.writeStatus();
+        ops.pollCommands();
+      }, 100L, 100L));
+      // Main thread: the summary reads the online player count.
+      tasks.add(Bukkit.getScheduler().runTaskTimer(this, ops::summarize, 6000L, 6000L));
+    }
   }
 
   private void cancelTasks() {
@@ -295,6 +316,17 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private void applyConfig(RemoteConfig cfg) {
     remoteConfig = cfg;
     stats.invalidateSelection();
+    if (ops != null) {
+      JsonObject details = new JsonObject();
+      details.addProperty("version", cfg.version());
+      details.addProperty("source", cfg.source());
+      details.addProperty("generation", cfg.generation());
+      ops.report(cfg.version() > 0 ? "info" : "warn", "config",
+          cfg.version() > 0 ? "config.applied" : "config.unavailable",
+          cfg.version() > 0 ? "Remote config v" + cfg.version() + " applied (" + cfg.source() + ")"
+              : "Remote config unavailable, keeping the last good copy",
+          details);
+    }
     if (!firstConfigApplied && cfg.version() > 0) {
       firstConfigApplied = true;
       sinks.flushAll();
@@ -355,9 +387,64 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
   // ---------------------------------------------------------------- commands
 
+  // Package-private accessors for BridgeOps. The website-facing diagnostics
+  // need the same objects the in-game status line reads, and widening these
+  // avoids duplicating that logic.
+
+  SupabaseRest restApi() {
+    return rest;
+  }
+
+  SinkManager sinkManager() {
+    return sinks;
+  }
+
+  RemoteConfig config() {
+    return remoteConfig;
+  }
+
+  ChatBridge chatBridge() {
+    return chat;
+  }
+
+  WhitelistSync whitelistSync() {
+    return whitelist;
+  }
+
+  AchievementCollector achievementCollector() {
+    return achievements;
+  }
+
+  StatCollector statCollector() {
+    return stats;
+  }
+
+  BridgeOps opsApi() {
+    return ops;
+  }
+
   /** The jar this plugin was loaded from (JavaPlugin#getFile is protected). */
   public java.io.File pluginFile() {
     return getFile();
+  }
+
+  /** Pushes every queued row now instead of waiting for the next flush cycle. */
+  public void flushSinks(CommandSender sender) {
+    sender.sendMessage("§e[MiaucraftBridge] Flushing queued rows...");
+    int total = 0;
+    for (String table : BridgeOps.TRACKED_SINKS) total += sinks.pending(table);
+    if (total == 0) {
+      sender.sendMessage("§a[MiaucraftBridge] Nothing queued - all sinks are already empty.");
+      return;
+    }
+    final int queued = total;
+    sinks.flushAll().whenComplete((ignored, err) -> Bukkit.getScheduler().runTask(this, () -> {
+      if (err != null) {
+        sender.sendMessage("§c[MiaucraftBridge] Flush failed: " + err.getMessage());
+      } else {
+        sender.sendMessage("§a[MiaucraftBridge] Flushed " + queued + " queued row(s).");
+      }
+    }));
   }
 
   public void reloadRemote(CommandSender sender) {
