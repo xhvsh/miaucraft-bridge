@@ -58,3 +58,11 @@ update:
   # command when relaunching, e.g. "java -Xmx2048M -jar paper.jar nogui".
   # Must be a single line.
   restart-command: ""
+
+# Bridge diagnostics retention. The plugin itself calls purge_bridge_history()
+# on this schedule - there is no pg_cron on the Supabase project. The API caps
+# bridge_events/bridge_console/bridge_commands/server_tps_samples at KEEP-DATA
+# rows each (see the same-named migration). Hours below 1 are clamped to 1.
+bridge:
+  retention:
+    purge-hours: 6

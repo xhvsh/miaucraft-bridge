@@ -48,6 +48,9 @@ public final class BridgeOps {
   private static final Duration CLAIM_TIMEOUT = Duration.ofMinutes(5);
   private static final int MAX_COMMANDS_PER_POLL = 5;
 
+  /** Longest acceptable stall while finalising update.apply before the JVM exits. */
+  private static final long FINISH_WAIT_MS = 4_000L;
+
   private static final long CONSOLE_WINDOW_MS = 60_000L;
   private static final int CONSOLE_KEYS_MAX = 500;
   private static final int CONSOLE_ROWS_PER_WINDOW_MAX = 240;
@@ -92,6 +95,7 @@ public final class BridgeOps {
   private int summarizeEvery;
 
   private final List<BukkitTask> watchers = new ArrayList<>();
+  private java.util.logging.Handler consoleHandler;
 
   public BridgeOps(MiaucraftBridgePlugin plugin) {
     this.plugin = plugin;
@@ -109,7 +113,8 @@ public final class BridgeOps {
   public void start() {
     pluginVersion = plugin.getPluginMeta().getVersion();
     serverVersion = Bukkit.getServer().getBukkitVersion();
-    plugin.getLogger().addHandler(new ConsoleMirror());
+    consoleHandler = new ConsoleMirror();
+    plugin.getLogger().addHandler(consoleHandler);
   }
 
   public void stop() {
@@ -120,6 +125,13 @@ public final class BridgeOps {
       }
     }
     watchers.clear();
+    if (consoleHandler != null) {
+      try {
+        plugin.getLogger().removeHandler(consoleHandler);
+      } catch (Exception ignored) {
+      }
+      consoleHandler = null;
+    }
   }
 
   public String instanceId() {
@@ -286,6 +298,26 @@ public final class BridgeOps {
     }
   }
 
+  // ----------------------------------------------------------------- retention
+
+  /**
+   * Applies the caps in purge_bridge_history() (events/console/commands/TPS).
+   * Nothing else invokes it: this project has no pg_cron, so the plugin owns
+   * the schedule. Runs on the async task pool, one RPC per hour by default.
+   */
+  public void runRetentionPurge() {
+    if (!online) return;
+    rest.rpc("purge_bridge_history", new JsonObject())
+        .thenAccept(res -> {
+          if (res.ok()) {
+            info("retention", "retention.purged", "Purged bridge tables per retention policy");
+          } else {
+            warn("retention", "retention.failed",
+                "Purge failed: " + (res.error != null ? res.error : "HTTP " + res.code));
+          }
+        });
+  }
+
   // ----------------------------------------------------------------- console
 
   private final class ConsoleMirror extends Handler {
@@ -359,7 +391,7 @@ public final class BridgeOps {
     polling = true;
     String stale = SupabaseRest.encode(Instant.now().minus(CLAIM_TIMEOUT).toString());
     rest.select("bridge-commands", "bridge_commands",
-            "select=id,command,args,requested_by_username&or=(status.eq.pending,and(status.eq.processing,claimed_at.lt."
+            "select=id,command,requested_by_username&or=(status.eq.pending,and(status.eq.processing,claimed_at.lt."
                 + stale + "))&order=requested_at.asc&limit=" + MAX_COMMANDS_PER_POLL)
         .whenComplete((rows, err) -> {
           polling = false;
@@ -383,7 +415,7 @@ public final class BridgeOps {
         }
         return claim(id).thenCompose(won -> {
           if (!won) return CompletableFuture.completedFuture(applied);
-          dispatch(id, command, row.has("args") ? row.get("args") : null);
+          dispatch(id, command);
           return CompletableFuture.completedFuture(applied + 1);
         });
       });
@@ -423,14 +455,24 @@ public final class BridgeOps {
    * Runs the action on the main thread behind a capturing sender, then watches
    * the sender until it goes quiet so an asynchronous result is still reported.
    */
-  private void dispatch(String id, String command, JsonElement args) {
+  private void dispatch(String id, String command) {
     Bukkit.getScheduler().runTask(plugin, () -> {
       CapturingSender sender = new CapturingSender(Bukkit.getConsoleSender());
 
       try {
         switch (command) {
           case "update.check" -> plugin.checkUpdate(sender);
-          case "update.apply" -> plugin.applyUpdate(sender);
+          case "update.apply" -> {
+            plugin.applyUpdate(sender);
+            if (announcesRestart(sender)) {
+              // applyUpdate scheduled Bukkit::shutdown for the next tick, which
+              // would kill the watcher before it ever finalises this row. The
+              // 5-minute stale claim would then re-run the update on the freshly
+              // started server, so the row must be terminal before we return.
+              finishAndWait(id, true, null, sender.text());
+              return;
+            }
+          }
           case "config.reload" -> plugin.reloadRemote(sender);
           case "connection.test" -> plugin.testConnection(sender);
           case "stats.reconcile" -> plugin.forceStats(sender);
@@ -449,6 +491,14 @@ public final class BridgeOps {
       report("info", "command", "command.started", "Started " + command, null);
       watch(id, command, sender);
     });
+  }
+
+  /** True when the capture shows the update was installed and the server will restart. */
+  static boolean announcesRestart(CapturingSender sender) {
+    for (String line : sender.lines()) {
+      if (line.contains("will restart now")) return true;
+    }
+    return false;
   }
 
   private void watch(String id, String command, CapturingSender sender) {
@@ -490,13 +540,46 @@ public final class BridgeOps {
   }
 
   private void finish(String id, boolean ok, String error, String output) {
+    JsonObject patch = completionPatch(ok, error, output);
+    rest.update("bridge-commands", "bridge_commands", "id=eq." + id, patch)
+        .whenComplete((res, err) -> {
+          if (err == null) return;
+          // A lost finalize leaves the row 'processing' until the stale claim
+          // re-runs it, so try once more instead of dropping it on the floor.
+          rest.update("bridge-commands", "bridge_commands", "id=eq." + id, patch)
+              .whenComplete((res2, err2) -> {
+                if (err2 != null) logFinishFailure(id, String.valueOf(err2));
+              });
+        });
+  }
+
+  /**
+   * Finalises a row synchronously because the JVM is about to exit. Only used
+   * for update.apply, whose outcome is decided before Bukkit shuts down on the
+   * very next tick; an async finalize would never complete.
+   */
+  private void finishAndWait(String id, boolean ok, String error, String output) {
+    JsonObject patch = completionPatch(ok, error, output);
+    try {
+      rest.update("bridge-commands", "bridge_commands", "id=eq." + id, patch)
+          .get(FINISH_WAIT_MS, TimeUnit.MILLISECONDS);
+    } catch (Exception e) {
+      logFinishFailure(id, String.valueOf(e));
+    }
+  }
+
+  static JsonObject completionPatch(boolean ok, String error, String output) {
     JsonObject patch = new JsonObject();
     patch.addProperty("status", ok ? "done" : "failed");
     patch.addProperty("processed_at", BridgeUtil.nowIso());
     if (error != null) patch.addProperty("error", error);
     if (output != null && !output.isBlank()) patch.addProperty("result", output);
-    rest.update("bridge-commands", "bridge_commands", "id=eq." + id, patch)
-        .handle((res, err) -> null);
+    return patch;
+  }
+
+  private void logFinishFailure(String id, String reason) {
+    warn("command", "command.finish_failed",
+        "Could not record command " + id + " as done/failed; it will be re-run: " + reason);
   }
 
   private static String str(JsonObject row, String key) {

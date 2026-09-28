@@ -2,6 +2,7 @@ package com.xhvsh.miaucraftbridge;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.net.URI;
@@ -193,6 +194,15 @@ public class SupabaseRest {
   public CompletableFuture<RawResult> rawUpsert(String table, JsonArray rows, String onConflict) {
     return raw(table, "POST", "on_conflict=" + encode(onConflict), rows,
         "resolution=merge-duplicates,missing=default,return=minimal");
+  }
+
+  /**
+   * Calls a PostgREST function ({@code rpc/<name>}) and reports the raw HTTP
+   * result, for maintenance calls like the retention purge that must not be
+   * throttled by a sink's backoff.
+   */
+  public CompletableFuture<RawResult> rpc(String name, JsonElement params) {
+    return raw("rpc/" + name, "POST", "", params == null ? new JsonObject() : params, "return=minimal");
   }
 
   public static final class RawResult {

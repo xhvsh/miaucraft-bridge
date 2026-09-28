@@ -9,10 +9,10 @@ import org.bukkit.permissions.PermissionAttachment;
 import org.bukkit.permissions.PermissionAttachmentInfo;
 import org.bukkit.plugin.Plugin;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * A CommandSender that records messages instead of showing them, so an action
@@ -29,8 +29,11 @@ public final class CapturingSender implements CommandSender {
   private static final int MAX_LINES = 200;
 
   private final CommandSender delegate;
-  private final List<String> lines = new ArrayList<>();
-  private boolean sawError;
+  // Async action threads (update.check, stats.reconcile) write lines while the
+  // main-thread watcher snapshots them in lines()/text(), so this must be safe
+  // for concurrent iteration while capture() adds to it.
+  private final List<String> lines = new CopyOnWriteArrayList<>();
+  private volatile boolean sawError;
 
   public CapturingSender(CommandSender delegate) {
     this.delegate = delegate;

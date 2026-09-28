@@ -47,7 +47,7 @@ insert into public.bridge_status (
 values (
   1,
   '00000000-0000-0000-0000-00000000cafe',
-  '2.4.7',
+'2.4.8',
   '1.21.11-R0.1-SNAPSHOT',
   true,
   now() - interval '2 days 4 hours',
@@ -91,31 +91,31 @@ on conflict (id) do update
       counters = excluded.counters;
 
 insert into public.bridge_events (created_at, level, category, event, message, details, plugin_version, instance_id) values
-  (now() - interval '2 days 4 hours', 'info', 'lifecycle', 'server.online', 'Plugin enabled', '{}'::jsonb, '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '2 days 3 hours', 'info', 'config', 'config.applied', 'Remote config v3 applied (github)', jsonb_build_object('version', 3, 'source', 'github'), '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '50 minutes', 'info', 'update', 'update.staged', 'staged v2.4.7 (284913 bytes - sha 91f0ac2d)', jsonb_build_object('version', '2.4.7'), '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '5 minutes', 'error', 'command', 'command.failed', 'stats.reconcile failed', jsonb_build_object('command_id', 3), '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '4 minutes', 'warn', 'collector', 'collector.summary', '12 queued row(s), 1 sink(s) failing', jsonb_build_object('players_online', 3, 'chat_relayed', 128, 'rows_queued', 12, 'failing_sinks', jsonb_build_object('bridge_console', 'chat_messages: HTTP 401')), '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '1 minute', 'info', 'collector', 'collector.summary', '8 queued row(s), all sinks healthy', jsonb_build_object('players_online', 2, 'chat_relayed', 6, 'rows_queued', 8), '2.4.7', '00000000-0000-0000-0000-00000000cafe');
+  (now() - interval '2 days 4 hours', 'info', 'lifecycle', 'server.online', 'Plugin enabled', '{}'::jsonb, '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '2 days 3 hours', 'info', 'config', 'config.applied', 'Remote config v3 applied (github)', jsonb_build_object('version', 3, 'source', 'github'), '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '50 minutes', 'info', 'update', 'update.staged', 'staged v2.4.8 (284913 bytes - sha 91f0ac2d)', jsonb_build_object('version', '2.4.8'), '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '5 minutes', 'error', 'command', 'command.failed', 'stats.reconcile failed', jsonb_build_object('command_id', 3), '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '4 minutes', 'warn', 'collector', 'collector.summary', '12 queued row(s), 1 sink(s) failing', jsonb_build_object('players_online', 3, 'chat_relayed', 128, 'rows_queued', 12, 'failing_sinks', jsonb_build_object('bridge_console', 'chat_messages: HTTP 401')), '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '1 minute', 'info', 'collector', 'collector.summary', '8 queued row(s), all sinks healthy', jsonb_build_object('players_online', 2, 'chat_relayed', 6, 'rows_queued', 8), '2.4.8', '00000000-0000-0000-0000-00000000cafe');
 
 insert into public.bridge_console (created_at, level, logger, message, plugin_version, instance_id) values
-  (now() - interval '2 days 4 hours', 'info', 'MiaucraftBridge', 'Enabled - remote config from https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/remote-config.json', '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '49 minutes', 'info', 'MiaucraftBridge', 'update staged v2.4.7 (284913 bytes - sha 91f0ac2d) - run /bridge update apply to install', '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '5 minutes', 'error', 'MiaucraftBridge', 'chat_messages: HTTP 401 - permission denied for table chat_messages', '2.4.7', '00000000-0000-0000-0000-00000000cafe'),
-  (now() - interval '30 seconds', 'info', 'MiaucraftBridge', 'Remote config v3 applied (github).', '2.4.7', '00000000-0000-0000-0000-00000000cafe');
+  (now() - interval '2 days 4 hours', 'info', 'MiaucraftBridge', 'Enabled - remote config from https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/remote-config.json', '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '49 minutes', 'info', 'MiaucraftBridge', 'update staged v2.4.8 (284913 bytes - sha 91f0ac2d) - run /bridge update apply to install', '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '5 minutes', 'error', 'MiaucraftBridge', 'chat_messages: HTTP 401 - permission denied for table chat_messages', '2.4.8', '00000000-0000-0000-0000-00000000cafe'),
+  (now() - interval '30 seconds', 'info', 'MiaucraftBridge', 'Remote config v3 applied (github).', '2.4.8', '00000000-0000-0000-0000-00000000cafe');
 
 insert into public.bridge_commands (
-  id, created_at, requested_at, command, args, status, requested_by_username,
+  id, created_at, requested_at, command, status, requested_by_username,
   claimed_at, claimed_by, processed_at, result, error)
 values
-  (1, now() - interval '30 minutes', now() - interval '30 minutes', 'update.check', '{}'::jsonb, 'done',
+  (1, now() - interval '30 minutes', now() - interval '30 minutes', 'update.check', 'done',
    'xhvsh', now() - interval '30 minutes', '00000000-0000-0000-0000-00000000cafe', now() - interval '30 minutes',
    '[MiaucraftBridge] Checking for updates...
-[MiaucraftBridge] staged v2.4.7 (284913 bytes - sha 91f0ac2d)', null),
-  (2, now() - interval '25 minutes', now() - interval '25 minutes', 'update.apply', '{}'::jsonb, 'done',
+[MiaucraftBridge] staged v2.4.8 (284913 bytes - sha 91f0ac2d)', null),
+  (2, now() - interval '25 minutes', now() - interval '25 minutes', 'update.apply', 'done',
    'xhvsh', now() - interval '25 minutes', '00000000-0000-0000-0000-00000000cafe', now() - interval '25 minutes',
-   '[MiaucraftBridge] Installed v2.4.7 (sha 91f0ac2d) - the server will restart now.', null),
-  (3, now() - interval '5 minutes', now() - interval '5 minutes', 'stats.reconcile', '{}'::jsonb, 'failed',
+   '[MiaucraftBridge] Installed v2.4.8 (sha 91f0ac2d) - the server will restart now.', null),
+  (3, now() - interval '5 minutes', now() - interval '5 minutes', 'stats.reconcile', 'failed',
    'xhvsh', now() - interval '5 minutes', '00000000-0000-0000-0000-00000000cafe', now() - interval '5 minutes',
    '[MiaucraftBridge] Reconciling stats for online players...', 'A stat reconcile is already running.');
 

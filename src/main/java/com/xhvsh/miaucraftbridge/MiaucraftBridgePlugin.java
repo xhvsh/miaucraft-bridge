@@ -254,6 +254,12 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       }, 100L, 100L));
       // Main thread: the summary reads the online player count.
       tasks.add(Bukkit.getScheduler().runTaskTimer(this, ops::summarize, 6000L, 6000L));
+
+      // Applies the DB retention caps in purge_bridge_history(). Nothing else
+      // runs it, so the plugin owns the schedule; first run 30s after start.
+      long purgeHours = Math.max(1, getConfig().getLong("bridge.retention.purge-hours", 6));
+      tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, ops::runRetentionPurge,
+          600L, purgeHours * 3600L * 20L));
     }
   }
 

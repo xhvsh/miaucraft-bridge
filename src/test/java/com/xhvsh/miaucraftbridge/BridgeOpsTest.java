@@ -1,5 +1,6 @@
 package com.xhvsh.miaucraftbridge;
 
+import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -116,5 +117,65 @@ class BridgeOpsTest {
     assertEquals("[MiaucraftBridge] done",
         CapturingSender.stripColors("\u00a7a[MiaucraftBridge] \u00a7fdone"));
     assertEquals("no codes here", CapturingSender.stripColors("no codes here"));
+  }
+
+  @Test
+  void sawErrorFlagsColourCodedFailures() {
+    CapturingSender sender = new CapturingSender(null);
+    sender.sendMessage("\u00a7a[MiaucraftBridge] fine");
+    assertFalse(sender.sawError(), "an ordinary line must not be read as a failure");
+    sender.sendMessage("\u00a74[MiaucraftBridge] \u00a7cboom");
+    assertTrue(sender.sawError(), "a red line is the plugin's failure signal");
+  }
+
+  @Test
+  void capturingSenderIsSafeToSnapshotWhileBeingWritten() throws Exception {
+    CapturingSender sender = new CapturingSender(null);
+    int threads = 4;
+    // under CapturingSender.MAX_LINES so nothing is truncated away
+    int perThread = 40;
+    Runnable writer = () -> {
+      for (int i = 0; i < perThread; i++) {
+        sender.sendMessage(Thread.currentThread().getName() + "-" + i);
+      }
+    };
+    List<Thread> started = new ArrayList<>();
+    for (int t = 0; t < threads; t++) {
+      Thread th = new Thread(writer, "t" + t);
+      started.add(th);
+      th.start();
+    }
+    // Snapshot while writers are still mid-flight: this is exactly what the
+    // main-thread watcher does against async update/stats threads.
+    for (int i = 0; i < 50; i++) sender.lines();
+    for (Thread th : started) th.join();
+    assertEquals(threads * perThread, sender.text().lines().count());
+    assertTrue(sender.lines().contains("t3-" + (perThread - 1)));
+  }
+
+  @Test
+  void announcesRestartRequiresTheRestartAnnouncement() {
+    CapturingSender staged = new CapturingSender(null);
+    staged.sendMessage("[MiaucraftBridge] staged v2.4.8 (284913 bytes - sha 91f0ac2d)");
+    assertFalse(BridgeOps.announcesRestart(staged), "a staged update is not a restart yet");
+
+    CapturingSender applied = new CapturingSender(null);
+    applied.sendMessage("[MiaucraftBridge] Installed v2.4.8 (sha 91f0ac2d) - the server will restart now.");
+    assertTrue(BridgeOps.announcesRestart(applied),
+        "apply must finalise the row before the JVM exits");
+  }
+
+  @Test
+  void completionPatchSkipsBlankOutputAndOnlyAddsErrorWhenGiven() {
+    JsonObject ok = BridgeOps.completionPatch(true, null, "");
+    assertEquals("done", ok.get("status").getAsString());
+    assertTrue(ok.has("processed_at"));
+    assertFalse(ok.has("result"));
+    assertFalse(ok.has("error"));
+
+    JsonObject failed = BridgeOps.completionPatch(false, "boom", "  ");
+    assertEquals("failed", failed.get("status").getAsString());
+    assertEquals("boom", failed.get("error").getAsString());
+    assertFalse(failed.has("result"), "whitespace output is not worth storing");
   }
 }
