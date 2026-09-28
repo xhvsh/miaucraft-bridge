@@ -260,6 +260,42 @@ grant usage, select on all sequences in schema public to service_role;
 revoke all on public.bridge_status, public.bridge_events, public.bridge_console, public.bridge_commands from anon;
 
 -- ---------------------------------------------------------------------------
+-- 5b. Realtime
+--
+-- A table only emits postgres_changes to a subscribed client once it is in the
+-- supabase_realtime publication. Supabase does not error when you subscribe to
+-- a table that is not in it: the channel connects and then stays silent, which
+-- looks exactly like a page that never refreshes. So this is load-bearing, not
+-- an optimisation.
+--
+-- REPLICA IDENTITY FULL additionally carries the old row on UPDATE/DELETE,
+-- which is what the command list wants when a status changes.
+-- ---------------------------------------------------------------------------
+
+do $$
+declare
+  t text;
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    foreach t in array array[
+      'bridge_status', 'bridge_events', 'bridge_console', 'bridge_commands'
+    ]
+    loop
+      begin
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      exception when duplicate_object then null;
+      end;
+    end loop;
+  end if;
+end;
+$$;
+
+alter table public.bridge_status   replica identity full;
+alter table public.bridge_events   replica identity full;
+alter table public.bridge_console  replica identity full;
+alter table public.bridge_commands replica identity full;
+
+-- ---------------------------------------------------------------------------
 -- 6. Retention
 --
 -- bridge_console is the only table that can grow quickly, so it is capped
