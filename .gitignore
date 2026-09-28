@@ -9,7 +9,6 @@ dev/supabase/.temp/
 dev/supabase/.branches/
 dev/supabase/volumes/
 dev/supabase/.env
-dev/supabase/seed.sql
 
 # Local runtime state written by the plugin
 **/bridge-state.json

@@ -1,5 +1,13 @@
--- Seed data for local testing. Delete this file (or run `supabase db reset`)
--- once the production dump is in place.
+-- LOCAL SAMPLE DATA - never applied to production.
+--
+-- This file lives outside migrations/ on purpose. The Supabase CLI runs it
+-- only for `supabase db reset` (local stack), and never for `supabase db push`.
+-- It used to sit in migrations/ as 20260101000100_seed.sql, which meant a db
+-- push would have written a fake TestPlayer, fake stats and a fake live
+-- position into production and overwritten the real server_status_public row.
+--
+-- It inserts a throwaway TestPlayer, some sample stats, a sample position and
+-- a sample system message so the local site has something to render.
 
 insert into public.players (id, username, online, last_seen, live_tracking_enabled, hidden)
 values ('00000000-0000-0000-0000-000000000001', 'TestPlayer', true, now(), true, false)
