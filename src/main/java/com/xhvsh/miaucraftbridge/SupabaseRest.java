@@ -93,7 +93,7 @@ public class SupabaseRest {
     this.apiKey = serviceRoleKey;
     this.schema = (schema == null || schema.isBlank()) ? "public" : schema;
     this.log = log;
-    this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
   }
 
   /**
@@ -165,7 +165,7 @@ public class SupabaseRest {
     try {
       builder = HttpRequest.newBuilder()
           .uri(URI.create(restPath(table, query)))
-          .timeout(Duration.ofSeconds(20))
+          .timeout(Duration.ofSeconds(30))
           .header("apikey", apiKey)
           .header("Authorization", "Bearer " + apiKey);
     } catch (RuntimeException e) {
@@ -225,6 +225,10 @@ public class SupabaseRest {
     return restBase + "/" + table + (query == null || query.isEmpty() ? "" : "?" + query);
   }
 
+  /** Thrown inside thenApply to trigger the single quiet cold-start retry. */
+  private static final class Retryable extends RuntimeException {
+  }
+
   private CompletableFuture<JsonElement> send(String sink, String method, String url,
       JsonElement body, String prefer) {
     if (!isEnabled()) return rejected(sink + " suppressed: bridge disabled by config");
@@ -232,12 +236,16 @@ public class SupabaseRest {
     if (backoff.blocked()) {
       return rejected(sink + " suppressed by backoff (" + backoff.failureCount() + " failures)");
     }
+    return attempt(sink, method, url, body, prefer, backoff, false);
+  }
 
+  private CompletableFuture<JsonElement> attempt(String sink, String method, String url,
+      JsonElement body, String prefer, Backoff backoff, boolean retried) {
     HttpRequest.Builder builder;
     try {
       builder = HttpRequest.newBuilder()
           .uri(URI.create(url))
-          .timeout(Duration.ofSeconds(15))
+          .timeout(Duration.ofSeconds(30))
           .header("apikey", apiKey)
           .header("Authorization", "Bearer " + apiKey);
     } catch (RuntimeException e) {
@@ -261,6 +269,12 @@ public class SupabaseRest {
         .thenApply(res -> {
           int code = res.statusCode();
           if (code >= 300) {
+            // A paused project wakes with a burst of 5xx/transport failures. On
+            // the first failure of a sink, retry once quietly instead of warning
+            // + backing off while the database is still booting.
+            if (!retried && backoff.failureCount() == 0 && code >= 500) {
+              throw new Retryable();
+            }
             backoff.fail();
             lastErrors.put(sink, "HTTP " + code + ": " + abbreviate(res.body()));
             if (backoff.failureCount() == 1) {
@@ -280,12 +294,20 @@ public class SupabaseRest {
             return null;
           }
         })
-        .exceptionally(err -> {
+        .exceptionallyCompose(err -> {
           Throwable cause = err.getCause() != null ? err.getCause() : err;
+          if (cause instanceof Retryable && !retried) {
+            return attempt(sink, method, url, body, prefer, backoff, true);
+          }
           if (cause instanceof HttpError httpError) {
             // Already accounted for (or a backoff/disabled rejection): keep the
             // original message and never double-count the failure.
             throw httpError;
+          }
+          if (cause instanceof java.io.IOException && !retried) {
+            // Same cold-start rescue for a transport failure (connect/request
+            // timeout before any HTTP status arrived).
+            return attempt(sink, method, url, body, prefer, backoff, true);
           }
           backoff.fail();
           lastErrors.put(sink, "transport: " + cause);

@@ -290,12 +290,9 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   }
 
   private void updateTick() {
+    // Updater already logs staged updates (with the apply hint) and failures, so
+    // nothing is echoed back here - one message on the console, not two.
     updater.check().thenAccept(msg -> {
-      boolean notable = msg != null
-          && (msg.startsWith("staged") || msg.startsWith("check failed"));
-      if (notable || (remoteConfig != null && remoteConfig.debugLog())) {
-        getLogger().info("update: " + msg);
-      }
       if (updater.autoApply() && updater.hasStaged()) {
         Bukkit.getScheduler().runTask(this, () -> {
           getLogger().info("auto-applying staged update v" + updater.stagedVersion());

@@ -89,7 +89,7 @@ public final class Updater {
   private final boolean relaunch;
   private final String restartCommand;
   private final HttpClient http =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
   private final AtomicBoolean checking = new AtomicBoolean(false);
   private final AtomicBoolean applying = new AtomicBoolean(false);
 
@@ -169,7 +169,7 @@ public final class Updater {
       requireHttps(manifest, "update.manifest-url");
       req = HttpRequest.newBuilder()
           .uri(URI.create(manifest))
-          .timeout(Duration.ofSeconds(20))
+          .timeout(Duration.ofSeconds(30))
           .header("User-Agent", "MiaucraftBridge/" + currentVersion())
           .header("Accept", "application/vnd.github.raw+json")
           .GET()
@@ -181,13 +181,10 @@ public final class Updater {
       return CompletableFuture.completedFuture(lastResult);
     }
 
-    return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
-        .thenApply(res -> {
-          if (res.statusCode() >= 300) {
-            throw new RuntimeException("manifest HTTP " + res.statusCode());
-          }
+    return sendManifest(req)
+        .thenApply(body -> {
           try {
-            return stage(JsonParser.parseString(res.body()).getAsJsonObject());
+            return stage(JsonParser.parseString(body).getAsJsonObject());
           } catch (Exception e) {
             throw new RuntimeException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
           }
@@ -199,6 +196,30 @@ public final class Updater {
           return msg;
         })
         .whenComplete((res, err) -> checking.set(false));
+  }
+
+  /** Fetches the manifest body, retrying once quietly on a transport failure. */
+  private CompletableFuture<String> sendManifest(HttpRequest req) {
+    return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        .thenApply(res -> {
+          if (res.statusCode() >= 300) {
+            throw new RuntimeException("manifest HTTP " + res.statusCode());
+          }
+          return res.body();
+        })
+        .exceptionallyCompose(err -> {
+          Throwable cause = err.getCause() != null ? err.getCause() : err;
+          if (!(cause instanceof java.io.IOException)) {
+            return CompletableFuture.failedFuture(err);
+          }
+          return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+              .thenApply(res -> {
+                if (res.statusCode() >= 300) {
+                  throw new RuntimeException("manifest HTTP " + res.statusCode());
+                }
+                return res.body();
+              });
+        });
   }
 
   private synchronized String stage(JsonObject manifest) throws Exception {
@@ -365,17 +386,39 @@ public final class Updater {
   }
 
   /**
-   * True when the manifest sha matches the currently loaded jar, i.e. a
+   * True when the manifest sha matches the currently installed jar, i.e. a
    * same-version manifest really is the build already running. A same-version
    * manifest with a DIFFERENT sha means a re-build must stage.
+   *
+   * <p>The comparison is against the ORIGINAL plugin jar ({@link #installedJarFile()}),
+   * not Paper's remapped copy: installs replace the original, so after an update
+   * its bytes are exactly the published ones. Hashing the remapped copy would
+   * see a different (re-signed, fast-joined) sha and re-stage on every check.
    */
   private boolean currentJarMatches(String sha) {
     if (sha == null || sha.isBlank()) return false;
+    Path jar = installedJarFile();
+    if (jar == null) return true; // can't verify - don't loop re-staging on every check
     try {
-      Path jar = plugin.pluginFile().toPath();
       return jar.toFile().exists() && sha.equalsIgnoreCase(sha256(jar));
     } catch (Exception e) {
       return true; // can't verify - don't loop re-staging on every check
+    }
+  }
+
+  /**
+   * The file the updater installs into: the original plugin jar in plugins/.
+   * Paper loads a remapped copy from plugins/.paper-remapped/, so the original
+   * is the one that carries the published sha before and after an update.
+   */
+  private Path installedJarFile() {
+    Path jar = ownJar();
+    if (jar != null && Files.isRegularFile(jar)) return jar;
+    try {
+      java.io.File file = plugin.pluginFile();
+      return file != null && file.isFile() ? file.toPath() : jar;
+    } catch (Exception e) {
+      return jar;
     }
   }
 
@@ -391,14 +434,11 @@ public final class Updater {
     return HexFormat.of().formatHex(md.digest());
   }
 
-  /** Short id of the jar currently loaded, so status shows what is really running. */
+  /** Short id of the installed jar, so status shows what is really running. */
   public String runningShaShort() {
-    try {
-      Path jar = plugin.pluginFile().toPath();
-      return jar.toFile().exists() ? shortSha(jar) : "?";
-    } catch (Exception e) {
-      return "?";
-    }
+    Path jar = installedJarFile();
+    if (jar == null || !jar.toFile().exists()) return "?";
+    return shortSha(jar);
   }
 
   private static String shortSha(Path file) {
