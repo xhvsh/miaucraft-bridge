@@ -85,6 +85,8 @@ public final class BridgeCommand implements CommandExecutor, TabCompleter {
       case "status" -> {
         sender.sendMessage("§6[MiaucraftBridge] live map");
         sender.sendMessage("§7running: §f" + map.isRunning());
+        sender.sendMessage("§7colors: §f" + (MapColors.usingVanillaColors() ? "vanilla (NMS)" : "built-in table"));
+        sender.sendMessage("§7captured chunks: §f" + map.capturedCount());
         sender.sendMessage("§7rendered regions: §f" + map.renderedCount());
         sender.sendMessage("§7pending: §f" + map.pendingCount());
         sender.sendMessage("§7upload failures: §f" + map.uploadFailures());
@@ -93,7 +95,7 @@ public final class BridgeCommand implements CommandExecutor, TabCompleter {
       case "render" -> {
         int radius = args.length >= 3 ? parsePositive(args[2], -1) : -1;
         if (radius <= 0) {
-          sender.sendMessage("§e[MiaucraftBridge] /bridge map render [radius] - render radius ~ spawn (use update-sweep for new terrain).");
+          sender.sendMessage("§e[MiaucraftBridge] /bridge map render [radius] - (re)render radius ~ spawn from captured chunks.");
           return;
         }
         map.renderRadius(radius);

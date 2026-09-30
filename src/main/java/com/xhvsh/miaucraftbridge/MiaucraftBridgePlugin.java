@@ -131,6 +131,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     // other behavior, so it can be flipped from GitHub without touching any
     // server file. Until the first supported remote config lands, the local
     // config.yml "map.enabled" is the initial state.
+    MapColors.init(getLogger());
     syncLiveMap();
 
     getServer().getPluginManager().registerEvents(presence, this);

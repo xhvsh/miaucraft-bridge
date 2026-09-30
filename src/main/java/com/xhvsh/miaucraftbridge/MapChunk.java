@@ -1,37 +1,56 @@
 package com.xhvsh.miaucraftbridge;
 
-import java.util.HashMap;
-import java.util.Map;
+import org.bukkit.ChunkSnapshot;
+import org.bukkit.Material;
 
 /**
- * Decoded column data for one chunk: per column (x,z 0..15) the world surface
- * height and its pixel color. Parsed directly from the region-file NBT, so no
- * chunk is ever loaded into the server and the main thread is never touched.
+ * Per-column surface data for one chunk, colourised for the map. Built from a
+ * live {@link ChunkSnapshot} (captured on the main thread) entirely off-thread,
+ * which is squaremap's data-collection model: the world's real blocks and
+ * biomes feed the colour pipeline instead of re-parsing region files.
  */
 final class MapChunk {
 
-  /** One 16x16-y section. */
-  private static final class Section {
-    final int minY;
-    final String[] blockPalette;
-    final long[] blockData;
-    final int blockBits;
-    final String[] biomePalette;
-    final long[] biomeData;
-    final int biomeBits;
+  /** The few slices of a world a render pass needs; keeps MapChunk pure and testable. */
+  interface ChunkSampler {
+    int highest(int x, int z);
 
-    Section(int minY, String[] blockPalette, long[] blockData, String[] biomePalette, long[] biomeData) {
-      this.minY = minY;
-      this.blockPalette = blockPalette;
-      this.blockData = blockData;
-      this.blockBits = blockPalette.length <= 1 ? 0
-          : Math.max(4, 32 - Integer.numberOfLeadingZeros(blockPalette.length - 1));
-      this.biomePalette = biomePalette;
-      this.biomeData = biomeData;
-      this.biomeBits = biomePalette.length <= 1 ? 0
-          : Math.max(4, 32 - Integer.numberOfLeadingZeros(biomePalette.length - 1));
+    Material material(int x, int y, int z);
+
+    /** Biome key (e.g. "minecraft:plains" or "plains"); empty when unavailable. */
+    String biome(int x, int y, int z);
+  }
+
+  /** Adapter over Bukkit's thread-safe snapshot for production use. */
+  static final class SnapshotSampler implements ChunkSampler {
+    private final ChunkSnapshot snapshot;
+
+    SnapshotSampler(ChunkSnapshot snapshot) {
+      this.snapshot = snapshot;
+    }
+
+    @Override
+    public int highest(int x, int z) {
+      return snapshot.getHighestBlockYAt(x, z);
+    }
+
+    @Override
+    public Material material(int x, int y, int z) {
+      return snapshot.getBlockType(x & 15, y, z & 15);
+    }
+
+    @Override
+    public String biome(int x, int y, int z) {
+      try {
+        return snapshot.getBiome(x & 15, z & 15).getKey().getKey();
+      } catch (Exception e) {
+        return "";
+      }
     }
   }
+
+  /** How far below the heightmap a render must look before giving up. */
+  private static final int SCAN_DEPTH = 16;
 
   final int chunkX;
   final int chunkZ;
@@ -41,204 +60,40 @@ final class MapChunk {
   final int[] heights = new int[256];
   final int[] colors = new int[256];
 
-  private final Map<Integer, Section> sections = new HashMap<>();
-  private int minWorldY = -64;
-  private int maxWorldY = 319;
-
-  MapChunk(int chunkX, int chunkZ, Nbt.Compound root, boolean resolveColors) {
+  MapChunk(int chunkX, int chunkZ, ChunkSampler sampler) {
     this.chunkX = chunkX;
     this.chunkZ = chunkZ;
-    parseSections(root);
-    int[] surface = surfaceHeights(root);
     for (int x = 0; x < 16; x++) {
       for (int z = 0; z < 16; z++) {
         int idx = z * 16 + x;
-        int h = surface[idx];
-        if (!resolveColors) {
-          valid[idx] = true;
-          heights[idx] = h;
-          continue;
-        }
-        // scan down from the surface to the first visible block (plants/water
-        // over foliage give the depth the renderer shades against)
-        int y = h;
-        String entry;
-        while (y >= minWorldY) {
-          entry = blockAt(x, y, z);
-          String base = Nbt.baseId(entry);
-          boolean snowyGrass = base.equals("grass_block") && Nbt.property(entry, "snowy", false);
-          if (!BlockColorTable.skipThrough(base) || snowyGrass) {
+        int surface = sampler.highest(x, z);
+        int y = surface;
+        String biomeKey = null;
+        while (y >= surface - SCAN_DEPTH) {
+          Material material = sampler.material(x, y, z);
+          if (material == null || material == Material.AIR) {
+            y--;
+            continue;
+          }
+          if (!BlockColorTable.skipThrough(key(material))) {
+            if (biomeKey == null) {
+              biomeKey = sampler.biome(x, y, z);
+            }
             heights[idx] = y;
-            colors[idx] = colorOf(entry, base, x, y, z, snowyGrass);
+            colors[idx] = MapColors.colorOf(material, biomeKey);
             valid[idx] = true;
             break;
           }
           y--;
         }
-        if (y < minWorldY) {
+        if (y < surface - SCAN_DEPTH) {
           valid[idx] = false;
         }
       }
     }
   }
 
-  private void parseSections(Nbt.Compound root) {
-    Nbt.Tag.TagList sectionsList = root.list("sections");
-    if (sectionsList == null || sectionsList.value == null) {
-      return;
-    }
-    for (Nbt.Tag tag : sectionsList.value) {
-      if (!(tag instanceof Nbt.Compound sec)) {
-        continue;
-      }
-      int y = sec.integer("Y", 0);
-      int minY = y * 16;
-      minWorldY = Math.min(minWorldY, minY);
-      maxWorldY = Math.max(maxWorldY, minY + 15);
-      Nbt.Compound blockStates = sec.compound("block_states");
-      String[] blockPalette = blockStates == null ? new String[0] : palette(blockStates);
-      long[] blockData = blockStates == null ? null : blockStates.longArray("data");
-      Nbt.Compound biomeHolder = sec.compound("biomes");
-      String[] biomePalette = biomeHolder == null ? new String[0] : palette(biomeHolder);
-      long[] biomeData = biomeHolder == null ? null : biomeHolder.longArray("data");
-      sections.put(y, new Section(minY, blockPalette, blockData, biomePalette, biomeData));
-    }
-  }
-
-  private static String[] palette(Nbt.Compound holder) {
-    Nbt.Tag.TagList l = holder.list("palette");
-    if (l == null || l.value == null) {
-      return new String[0];
-    }
-    String[] out = new String[l.value.size()];
-    for (int i = 0; i < l.value.size(); i++) {
-      out[i] = paletteEntry(l.value.get(i));
-    }
-    return out;
-  }
-
-  /**
-   * Real worlds store palette entries as compounds ({@code {"Name":..,"Properties":..}});
-   * the flat string form only exists in synthetic/old data. Both must decode to
-   * the canonical state string the color table understands.
-   */
-  private static String paletteEntry(Nbt.Tag tag) {
-    if (tag instanceof Nbt.Compound c) {
-      String name = c.string("Name", "minecraft:air");
-      Nbt.Compound props = c.compound("Properties");
-      if (props == null || props.keys().isEmpty()) {
-        return name;
-      }
-      StringBuilder sb = new StringBuilder(name).append('[');
-      boolean first = true;
-      for (String key : props.keys()) {
-        if (!first) {
-          sb.append(',');
-        }
-        sb.append(key).append('=').append(props.string(key, ""));
-        first = false;
-      }
-      return sb.append(']').toString();
-    }
-    return tag.stringValue("minecraft:air");
-  }
-
-  private int[] surfaceHeights(Nbt.Compound root) {
-    long[] worldSurface = root.compound("Heightmaps") == null ? null
-        : root.compound("Heightmaps").longArray("WORLD_SURFACE");
-    int[] h = Nbt.unpackHeightmap(worldSurface);
-    for (int idx = 0; idx < 256; idx++) {
-      if (h[idx] <= minWorldY) {
-        h[idx] = fallbackHeight(idx);
-      }
-    }
-    return h;
-  }
-
-  private int fallbackHeight(int idx) {
-    int x = idx & 15;
-    int z = idx >> 4;
-    for (Section sec : descendingSections()) {
-      if (sec.blockPalette.length == 0) {
-        continue;
-      }
-      int secMax = sec.minY + 15;
-      for (int y = secMax; y >= sec.minY; y--) {
-        String base = Nbt.baseId(blockAt(x, y, z, sec));
-        if (!base.equals("air") && !base.equals("cave_air") && !base.equals("void_air")
-            && !base.equals("water") && !base.equals("lava")) {
-          return y;
-        }
-      }
-    }
-    return minWorldY;
-  }
-
-  private Section[] descendingSections() {
-    return sections.values().stream()
-        .sorted((a, b) -> Integer.compare(b.minY, a.minY))
-        .toArray(Section[]::new);
-  }
-
-  private Section sectionForY(int y) {
-    return sections.get(Math.floorDiv(y, 16));
-  }
-
-  /** Resolves the full state string of one block (three-block palette lookup). */
-  private String blockAt(int x, int y, int z) {
-    Section sec = sectionForY(y);
-    return blockAt(x, y, z, sec);
-  }
-
-  private String blockAt(int x, int y, int z, Section sec) {
-    if (sec == null || sec.blockPalette.length == 0) {
-      return "minecraft:air";
-    }
-    int localY = Math.floorMod(y, 16);
-    int index = (localY << 8) | (z << 4) | x;
-    int paletteIndex = sec.blockBits == 0 ? 0
-        : Nbt.unpackPacked(sec.blockData, sec.blockBits, index, false);
-    if (paletteIndex < 0 || paletteIndex >= sec.blockPalette.length) {
-      return "minecraft:air";
-    }
-    return sec.blockPalette[paletteIndex];
-  }
-
-  private String biomeAt(int x, int y, int z) {
-    Section sec = sectionForY(y);
-    if (sec == null || sec.biomePalette.length == 0) {
-      return "minecraft:plains";
-    }
-    int localY = Math.floorMod(y, 16);
-    int qx = x >> 2;
-    int qy = localY >> 2;
-    int qz = z >> 2;
-    int index = (qy << 4) | (qz << 2) | qx;
-    int paletteIndex = sec.biomeBits == 0 ? 0
-        : Nbt.unpackPacked(sec.biomeData, sec.biomeBits, index, false);
-    if (paletteIndex < 0 || paletteIndex >= sec.biomePalette.length) {
-      return "minecraft:plains";
-    }
-    return sec.biomePalette[paletteIndex];
-  }
-
-  private int colorOf(String entry, String base, int x, int y, int z, boolean snowyGrass) {
-    if (snowyGrass) {
-      return 0xFFF2F2F2;
-    }
-    if (BlockColorTable.isTransparent(base)) {
-      return BlockColorTable.TRANSPARENT;
-    }
-    int c = BlockColorTable.colorOf(base);
-    if (BlockColorTable.isTintable(base)) {
-      double[] climate = BiomeTint.climate(biomeAt(x, y, z));
-      int tint = base.endsWith("_leaves") ? BiomeTint.foliage(climate[0], climate[1])
-          : BiomeTint.grass(climate[0], climate[1]);
-      double weight = base.equals("grass_block") ? 0.5 : 0.55;
-      c = BiomeTint.blend(c, tint, weight);
-    }
-    return c;
+  private static String key(Material m) {
+    return m.getKey().getKey();
   }
 }
-
-

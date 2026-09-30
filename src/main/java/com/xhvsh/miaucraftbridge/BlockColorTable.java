@@ -300,16 +300,13 @@ final class BlockColorTable {
         || baseId.endsWith("_sapling");
   }
 
-  /** Blocks that count as "air" while scanning down to a visible surface. */
+  /** Blocks that count as "air" while scanning down to a visible surface.
+   * Note water/lava are deliberately NOT here: oceans and rivers must render. */
   static boolean skipThrough(String baseId) {
     return isTransparent(baseId)
         || baseId.equals("snow_layer")
         || baseId.equals("powder_snow")
-        || baseId.equals("moss_carpet")
-        || baseId.equals("carpet")
-        || baseId.endsWith("_carpet")
-        || baseId.equals("water")
-        || baseId.equals("bubble_column");
+        || baseId.equals("moss_carpet");
   }
 
   /** True when the block is a hard stop for a down-scan (not air/water/plants). */

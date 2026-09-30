@@ -5,6 +5,28 @@ import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
+import org.bukkit.ChunkSnapshot;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockBurnEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockFadeEvent;
+import org.bukkit.event.block.BlockFormEvent;
+import org.bukkit.event.block.BlockFromToEvent;
+import org.bukkit.event.block.BlockGrowEvent;
+import org.bukkit.event.block.BlockMultiPlaceEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.block.BlockSpreadEvent;
+import org.bukkit.event.block.FluidLevelChangeEvent;
+import org.bukkit.event.block.EntityBlockFormEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -29,19 +51,113 @@ import java.util.function.BooleanSupplier;
 import java.util.logging.Logger;
 
 /**
- * Renders Anvil regions to 512px PNG tiles and publishes them to the site's
- * public Supabase Storage bucket (live map phases 1-4). Tile geometry matches
- * the site's Leaflet page: key {@code <basePath>/<world>/<zoom>/<x>_<z>.png},
- * where zoom {@code maxZoom} is one 512px tile per region and zoom {@code n}
- * is composited over 2^(maxZoom-n) regions.
+ * Live map engine (phases 1-4). Data no longer comes from .mca files: every
+ * chunk is captured as a thread-safe {@link ChunkSnapshot} on the main thread
+ * when it loads or a block in it changes, colourised off-thread into a
+ * {@link MapChunk}, and stored in memory. A changed chunk marks its region
+ * (512x512 blocks) dirty, which re-renders the region tile and merges it into
+ * each zoom composite before the changed tiles are uploaded to Supabase.
  *
- * <p>The render loop runs entirely on worker threads: every region is parsed
- * straight from disk, shaded, merged into each zoom composite under a
- * per-composite lock, encoded and queued for upload. The main thread is only
- * used to capture the world spawn on start and to schedule the change sweep.
- * Nothing here touches net.minecraft.
+ * <p>On start the already-generated chunks around spawn are loaded in small
+ * main-thread batches (the {@code map.bootstrap-num-chunks-per-tick} config),
+ * and every chunk the server loads while players explore is captured for free,
+ * so the map grows live. Tile geometry is unchanged: key
+ * {@code <basePath>/<world>/<zoom>/<x>_<z>.png}, zoom {@code maxZoom} is one
+ * tile per region, zoom {@code n} composites 2^(maxZoom-n) regions.
  */
 final class LiveMap {
+
+  /** Coordinates of a chunk waiting for its once-per-tick capture. */
+  private final Map<Long, Boolean> pendingCapture = new ConcurrentHashMap<>();
+
+  private static final class MapEvents implements Listener {
+    private final LiveMap map;
+
+    MapEvents(LiveMap map) {
+      this.map = map;
+    }
+
+    @EventHandler
+    public void onChunkLoad(ChunkLoadEvent e) {
+      map.onChunkLoaded(e.getChunk());
+    }
+
+    @EventHandler
+    public void onPlace(BlockPlaceEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onMultiPlace(BlockMultiPlaceEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onBreak(BlockBreakEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onFromTo(BlockFromToEvent e) {
+      map.onBlockChanged(e.getBlock());
+      map.onBlockChanged(e.getToBlock());
+    }
+
+    @EventHandler
+    public void onFluid(FluidLevelChangeEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onBlockExplode(BlockExplodeEvent e) {
+      for (Block b : e.blockList()) map.onBlockChanged(b);
+    }
+
+    @EventHandler
+    public void onEntityExplode(EntityExplodeEvent e) {
+      for (Block b : e.blockList()) map.onBlockChanged(b);
+    }
+
+    @EventHandler
+    public void onPistonExtend(BlockPistonExtendEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onPistonRetract(BlockPistonRetractEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onGrow(BlockGrowEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onSpread(BlockSpreadEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onForm(BlockFormEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onEntityBlockForm(EntityBlockFormEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onFade(BlockFadeEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+
+    @EventHandler
+    public void onBurn(BlockBurnEvent e) {
+      map.onBlockChanged(e.getBlock());
+    }
+  }
 
   private static final class State {
     Map<String, String> uploadedSha = new HashMap<>();
@@ -68,29 +184,31 @@ final class LiveMap {
   private final Gson gson = new Gson();
   private final BooleanSupplier masterEnabled;
 
-  private final Path mapDir;
-  private final Path stateFile;
   private final Path tilesDir;
+  private final Path stateFile;
 
   private final String bucket;
   private final String basePath;
   private final int maxZoom;
   private final int radius;
-  private final int sweepSeconds;
+  private final int bootstrapPerTick;
   private final int renderThreads;
   private final int uploadConcurrency;
 
   private final String[] worlds;
   private final Map<String, Integer> spawnX = new ConcurrentHashMap<>();
   private final Map<String, Integer> spawnZ = new ConcurrentHashMap<>();
-  private final Map<String, Path> worldRegionDirs = new ConcurrentHashMap<>();
+
+  /** Captured live chunks, keyed by {@link #terrainKey}. */
+  private final Map<Long, MapChunk> tracker = new ConcurrentHashMap<>();
+  /** Long-live pump counters for status. */
+  private final AtomicLong captured = new AtomicLong();
 
   private final SupabaseStorage storage;
 
   private final Set<Long> queuedOngoing = ConcurrentHashMap.newKeySet();
   private final Map<Long, Object> compositeLocks = new ConcurrentHashMap<>();
   private final Map<String, String> uploadedSha = new ConcurrentHashMap<>();
-  private final Map<Long, Long> regionMtimes = new ConcurrentHashMap<>();
 
   private final AtomicLong rendered = new AtomicLong();
   private final AtomicInteger uploadFailures = new AtomicInteger();
@@ -99,7 +217,7 @@ final class LiveMap {
   private ThreadPoolExecutor renderers;
   private ThreadPoolExecutor uploaders;
   private volatile boolean running;
-  private BukkitTask sweepTask;
+  private final List<BukkitTask> bootstrapTasks = new ArrayList<>();
 
   LiveMap(JavaPlugin plugin, SupabaseStorage storage, BooleanSupplier masterEnabled) {
     this.plugin = plugin;
@@ -107,16 +225,16 @@ final class LiveMap {
     this.storage = storage;
     this.masterEnabled = masterEnabled;
 
-    this.mapDir = plugin.getDataFolder().toPath().resolve("map");
-    this.stateFile = mapDir.resolve("map-state.json");
-    this.tilesDir = mapDir.resolve("tiles");
+    this.tilesDir = plugin.getDataFolder().toPath().resolve("map").resolve("tiles");
+    this.stateFile = plugin.getDataFolder().toPath().resolve("map").resolve("map-state.json");
 
     this.bucket = plugin.getConfig().getString("map.bucket", "maps");
     this.basePath = plugin.getConfig().getString("map.base-path", "");
     int maxZoom = plugin.getConfig().getInt("map.max-zoom", 3);
     this.maxZoom = Math.max(1, Math.min(5, maxZoom));
     this.radius = Math.max(512, plugin.getConfig().getInt("map.radius", 1000));
-    this.sweepSeconds = Math.max(30, plugin.getConfig().getInt("map.update-sweep-seconds", 120));
+    this.bootstrapPerTick = Math.max(8,
+        plugin.getConfig().getInt("map.bootstrap-num-chunks-per-tick", 64));
 
     int cores = Runtime.getRuntime().availableProcessors();
     int threads = plugin.getConfig().getInt("map.max-render-threads", -1);
@@ -129,7 +247,7 @@ final class LiveMap {
 
   // -------------------------------------------------------------- lifecycle
 
-  /** Captures spawns + world folders (main thread) and starts the queues. */
+  /** Captures spawns (main thread) and starts the queues + capture listeners. */
   void start() {
     try {
       Files.createDirectories(tilesDir);
@@ -140,7 +258,7 @@ final class LiveMap {
     loadState();
 
     for (String world : worlds) {
-      org.bukkit.World bw = Bukkit.getWorld(world);
+      World bw = Bukkit.getWorld(world);
       if (bw == null) {
         log.warning("map: world '" + world + "' is not loaded, skipping");
         continue;
@@ -148,7 +266,6 @@ final class LiveMap {
       org.bukkit.Location spawn = bw.getSpawnLocation();
       spawnX.put(world, spawn.getBlockX());
       spawnZ.put(world, spawn.getBlockZ());
-      worldRegionDirs.put(world, bw.getWorldFolder().toPath().resolve("region"));
     }
 
     running = true;
@@ -158,28 +275,28 @@ final class LiveMap {
         new LinkedBlockingQueue<>(), daemonFactory("map-upload"));
     uploaders.allowCoreThreadTimeOut(true);
 
-    for (String world : spawnX.keySet()) {
-      enqueueRadius(world, radius);
-    }
+    Bukkit.getPluginManager().registerEvents(new MapEvents(this), plugin);
 
-    sweepTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin,
-        this::sweep, 20L * sweepSeconds, 20L * sweepSeconds);
+    for (String world : spawnX.keySet()) {
+      bootstrap(world);
+    }
 
     publishWorldsMeta();
     log.info("map: enabled worlds=" + String.join(",", spawnX.keySet())
         + " radius=" + radius + " threads=" + renderThreads
-        + " zooms=0.." + maxZoom + " bucket=" + bucket);
+        + " zooms=0.." + maxZoom + " bucket=" + bucket
+        + " colors=" + (MapColors.usingVanillaColors() ? "nms" : "builtin-table"));
   }
 
   void stop() {
     running = false;
-    if (sweepTask != null) {
+    for (BukkitTask task : bootstrapTasks) {
       try {
-        sweepTask.cancel();
+        task.cancel();
       } catch (Exception ignored) {
       }
-      sweepTask = null;
     }
+    bootstrapTasks.clear();
     if (renderers != null) {
       renderers.shutdownNow();
     }
@@ -187,6 +304,9 @@ final class LiveMap {
     if (uploaders != null) {
       uploaders.shutdownNow();
     }
+    tracker.clear();
+    pendingCapture.clear();
+    queuedOngoing.clear();
     saveState();
   }
 
@@ -194,6 +314,10 @@ final class LiveMap {
 
   long renderedCount() {
     return rendered.get();
+  }
+
+  long capturedCount() {
+    return captured.get();
   }
 
   int pendingCount() {
@@ -212,15 +336,71 @@ final class LiveMap {
     return lastActivityMs.get();
   }
 
-  /** Re-renders the region containing the given block coords. */
-  void rerenderAround(int bx, int bz, String world) {
-    enqueueAt(world, Math.floorDiv(bx, 512), Math.floorDiv(bz, 512));
+  /** Captures this chunk's current state and renders whatever regions it touches. */
+  void onChunkLoaded(Chunk chunk) {
+    if (!running || !masterEnabled.getAsBoolean()) {
+      return;
+    }
+    ChunkSnapshot snapshot = chunk.getChunkSnapshot(true, true, false);
+    try {
+      renderers.execute(() -> captureChunk(chunk.getWorld().getName(), snapshot));
+    } catch (java.util.concurrent.RejectedExecutionException ignored) {
+      // shutting down: nothing runs anymore
+    }
   }
 
-  /** Renders (or re-renders) everything within {@code radius} blocks of spawn on the first configured world. */
+  /** Debounced to one capture per chunk per tick (a block edit burst = one capture). */
+  void onBlockChanged(Block block) {
+    if (!running || !masterEnabled.getAsBoolean()) {
+      return;
+    }
+    Chunk chunk = block.getChunk();
+    final String world = chunk.getWorld().getName();
+    final int cx = chunk.getX();
+    final int cz = chunk.getZ();
+    long key = terrainKey(world, cx, cz);
+    if (pendingCapture.putIfAbsent(key, Boolean.TRUE) != null) {
+      return;
+    }
+    Bukkit.getScheduler().runTask(plugin, () -> {
+      pendingCapture.remove(key);
+      if (!running) {
+        return;
+      }
+      Chunk current = null;
+      World bw = Bukkit.getWorld(world);
+      if (bw != null && bw.isChunkGenerated(cx, cz)) {
+        current = bw.getChunkAt(cx, cz);
+      }
+      if (current != null && current.isLoaded()) {
+        onChunkLoaded(current);
+      }
+    });
+  }
+
+  /** Re-renders the region containing the given block coords. */
+  void rerenderAround(int bx, int bz, String world) {
+    enqueueRegion(new RegionCoord(world, Math.floorDiv(bx, 512), Math.floorDiv(bz, 512)));
+  }
+
+  /** Renders (or re-renders) everything within {@code radiusBlocks} blocks of spawn on the first configured world. */
   void renderRadius(int radiusBlocks) {
     String world = worlds.length > 0 ? worlds[0] : "world";
     enqueueRadius(world, radiusBlocks > 0 ? radiusBlocks : this.radius);
+  }
+
+  /** Re-captures every currently loaded chunk of the given world. */
+  void recaptureWorld(String world) {
+    World bw = Bukkit.getWorld(world);
+    if (bw == null) {
+      log.warning("map: world '" + world + "' is not loaded");
+      return;
+    }
+    for (Chunk chunk : bw.getLoadedChunks()) {
+      if (chunk.isLoaded()) {
+        onChunkLoaded(chunk);
+      }
+    }
   }
 
   private void enqueueRadius(String world, int radiusBlocks) {
@@ -250,17 +430,13 @@ final class LiveMap {
       return Integer.compare(da, db);
     });
     for (RegionCoord rc : regions) {
-      enqueue(rc);
+      enqueueRegion(rc);
     }
     log.info("map: enqueued " + regions.size() + " region(s) for radius " + radiusBlocks
         + " around spawn of '" + world + "'");
   }
 
-  private void enqueueAt(String world, int regX, int regZ) {
-    enqueue(new RegionCoord(world, regX, regZ));
-  }
-
-  private void enqueue(RegionCoord rc) {
+  private void enqueueRegion(RegionCoord rc) {
     long key = rc.key();
     if (!queuedOngoing.add(key)) {
       return; // already queued or in flight
@@ -279,77 +455,44 @@ final class LiveMap {
     }
   }
 
-  // ------------------------------------------------------------------- sweep
+  // ------------------------------------------------------------- capture+render
 
-  private void sweep() {
+  /** Off-thread: colourises the snapshot into the tracker and dirties the region. */
+  private void captureChunk(String world, ChunkSnapshot snapshot) {
     if (!running || !masterEnabled.getAsBoolean()) {
       return;
     }
-    for (String world : worldRegionDirs.keySet()) {
-      Path regionDir = worldRegionDirs.get(world);
-      if (!Files.isDirectory(regionDir)) {
-        continue;
-      }
-      try (var stream = Files.list(regionDir)) {
-        stream.filter(p -> p.getFileName().toString().endsWith(".mca")).forEach(file -> {
-          int[] rc = coordsFromName(file.getFileName().toString());
-          if (rc == null) {
-            return;
-          }
-          int[] worldRc = rc;
-          long mtime;
-          try {
-            mtime = Files.getLastModifiedTime(file).toMillis();
-          } catch (IOException e) {
-            return;
-          }
-          long key = new RegionCoord(world, worldRc[0], worldRc[1]).key();
-          Long known = regionMtimes.get(key);
-          if (known == null) {
-            // baseline pass: remember without re-rendering
-            regionMtimes.put(key, mtime);
-            return;
-          }
-          if (mtime > known) {
-            regionMtimes.put(key, mtime);
-            enqueue(new RegionCoord(world, worldRc[0], worldRc[1]));
-          }
-        });
-      } catch (IOException e) {
-        log.warning("map: sweep of " + regionDir + " failed: " + e.getMessage());
-      }
+    try {
+      MapChunk chunk = new MapChunk(snapshot.getX(), snapshot.getZ(),
+          new MapChunk.SnapshotSampler(snapshot));
+      int cx = snapshot.getX();
+      int cz = snapshot.getZ();
+      tracker.put(terrainKey(world, cx, cz), chunk);
+      captured.incrementAndGet();
+      lastActivityMs.set(System.currentTimeMillis());
+      enqueueRegion(new RegionCoord(world, Math.floorDiv(cx, 32), Math.floorDiv(cz, 32)));
+    } catch (Exception e) {
+      log.warning("map: capture of chunk @x=" + snapshot.getX() + ",z=" + snapshot.getZ()
+          + " failed: " + e.getMessage());
     }
   }
-
-  // ------------------------------------------------------------- rendering
 
   private void renderRegion(RegionCoord rc) {
     if (!running || !masterEnabled.getAsBoolean()) {
       return;
     }
-    Path regionDir = worldRegionDirs.get(rc.world);
-    if (regionDir == null) {
-      return;
+    List<MapChunk> chunks = new ArrayList<>();
+    for (int sl = 0; sl < 32; sl++) {
+      for (int sc = 0; sc < 32; sc++) {
+        MapChunk m = tracker.get(terrainKey(rc.world, rc.x * 32 + sc, rc.z * 32 + sl));
+        if (m != null) {
+          chunks.add(m);
+        }
+      }
     }
-    Path file = regionDir.resolve("r." + rc.x + "." + rc.z + ".mca");
-    if (!Files.isRegularFile(file)) {
-      return; // no such region (e.g. beyond the world border)
-    }
-    AnvilRegion region;
-    try {
-      region = new AnvilRegion(file);
-    } catch (IOException e) {
-      log.warning("map: cannot open " + file + ": " + e.getMessage());
-      return;
-    }
-    BufferedImage tile;
-    try {
-      tile = MapRegionRenderer.render(regionDir, region);
-    } catch (IOException e) {
-      log.warning("map: render of " + file + " failed: " + e.getMessage());
-      return;
-    } finally {
-      region.close();
+    BufferedImage tile = MapRegionRenderer.render(chunks, rc.x, rc.z);
+    if (MapRegionRenderer.isBlank(tile)) {
+      return; // nothing captured for this region yet - upload nothing
     }
 
     int changed = mergeComposites(rc, tile);
@@ -440,6 +583,77 @@ final class LiveMap {
     Files.write(file, bytes);
   }
 
+  // ------------------------------------------------------------- bootstrap
+
+  /** Loads the already-generated chunks around spawn in main-thread batches. */
+  private void bootstrap(final String world) {
+    Integer sx = spawnX.get(world);
+    Integer sz = spawnZ.get(world);
+    if (sx == null || sz == null) {
+      return;
+    }
+    World bw = Bukkit.getWorld(world);
+    if (bw == null) {
+      return;
+    }
+    int cxs = Math.floorDiv(sx, 16);
+    int czs = Math.floorDiv(sz, 16);
+    int r = (radius + 15) / 16;
+    List<int[]> coords = new ArrayList<>();
+    int r2 = r * r;
+    for (int dx = -r; dx <= r; dx++) {
+      for (int dz = -r; dz <= r; dz++) {
+        if (dx * dx + dz * dz > r2) {
+          continue;
+        }
+        int cx = cxs + dx;
+        int cz = czs + dz;
+        // Only pre-existing chunks: never force world generation for the map.
+        if (bw.isChunkGenerated(cx, cz)) {
+          coords.add(new int[] {cx, cz});
+        }
+      }
+    }
+    coords.sort((a, b) -> Integer.compare(a[0] * a[0] + a[1] * a[1], b[0] * b[0] + b[1] * b[1]));
+
+    BukkitTask[] task = new BukkitTask[1];
+    final AtomicInteger cursor = new AtomicInteger();
+    Runnable step = new Runnable() {
+      @Override
+      public void run() {
+        if (!running) {
+          return;
+        }
+        int done = Math.min(coords.size(), cursor.get() + bootstrapPerTick);
+        while (cursor.get() < done) {
+          int[] c = coords.get(cursor.getAndIncrement());
+          if (!running) {
+            return;
+          }
+          if (bw.isChunkGenerated(c[0], c[1])) {
+            Chunk chunk = bw.getChunkAt(c[0], c[1]);
+            if (chunk.isLoaded()) {
+              onChunkLoaded(chunk);
+            }
+          }
+        }
+        if (cursor.get() < coords.size() && running) {
+          task[0] = Bukkit.getScheduler().runTask(plugin, this);
+        } else {
+          log.info("map: bootstrap done for '" + world + "', processed "
+              + (cursor.get() - 1) + " generated chunk(s)");
+        }
+      }
+    };
+    if (coords.isEmpty()) {
+      log.info("map: no pre-generated chunks around spawn of '" + world + "' - map will grow as chunks load");
+      return;
+    }
+    task[0] = Bukkit.getScheduler().runTask(plugin, step);
+    bootstrapTasks.add(task[0]);
+    log.info("map: bootstrap '" + world + "' scanning " + coords.size() + " generated chunk(s) around spawn");
+  }
+
   // ---------------------------------------------------------------- state
 
   private void loadState() {
@@ -497,9 +711,11 @@ final class LiveMap {
 
   // -------------------------------------------------------------- low-level
 
-  private static int[] coordsFromName(String name) {
-    int[] rc = AnvilRegion.parseCoords(name);
-    return rc[0] == Integer.MIN_VALUE ? null : rc;
+  /** Stable 64-bit key for a (world, chunk x, chunk z) triple. */
+  private static long terrainKey(String world, int cx, int cz) {
+    return (long) (world.hashCode() & 0xFFFFF) << 42
+        | (cx & 0x1FFFFF) << 21
+        | (cz & 0x1FFFFF);
   }
 
   private static String sha256(byte[] bytes) {
