@@ -1,6 +1,6 @@
 {
-    "version":  "2.5.1",
-    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/releases/miaucraft-bridge-plugin-2.5.1.jar",
-    "sha256":  "957954ee4ebc9692aa0c509f16ae15dda95b48ed672115efb09646c47fc8612e",
-    "notes":  "Release 2.5.1"
+    "version":  "2.5.2",
+    "url":  "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/releases/miaucraft-bridge-plugin-2.5.2.jar",
+    "sha256":  "c08133f19121160edd46e1855a0dfddcc999c6e00cd5a4b914e18e5c59ebf23b",
+    "notes":  "Release 2.5.2"
 }

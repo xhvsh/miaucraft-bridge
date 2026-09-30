@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Minimal NBT reader for Minecraft region files (the "anvil" on-disk format,
@@ -302,6 +303,10 @@ public static final class TagList extends Tag {
     public Compound compound(String key) {
       Tag t = entries.get(key);
       return t instanceof Compound c ? c : null;
+    }
+
+    public Set<String> keys() {
+      return entries.keySet();
     }
 
     public TagList list(String key) {

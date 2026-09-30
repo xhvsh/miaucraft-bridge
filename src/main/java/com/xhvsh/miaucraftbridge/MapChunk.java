@@ -112,9 +112,35 @@ final class MapChunk {
     }
     String[] out = new String[l.value.size()];
     for (int i = 0; i < l.value.size(); i++) {
-      out[i] = l.value.get(i).stringValue("minecraft:air");
+      out[i] = paletteEntry(l.value.get(i));
     }
     return out;
+  }
+
+  /**
+   * Real worlds store palette entries as compounds ({@code {"Name":..,"Properties":..}});
+   * the flat string form only exists in synthetic/old data. Both must decode to
+   * the canonical state string the color table understands.
+   */
+  private static String paletteEntry(Nbt.Tag tag) {
+    if (tag instanceof Nbt.Compound c) {
+      String name = c.string("Name", "minecraft:air");
+      Nbt.Compound props = c.compound("Properties");
+      if (props == null || props.keys().isEmpty()) {
+        return name;
+      }
+      StringBuilder sb = new StringBuilder(name).append('[');
+      boolean first = true;
+      for (String key : props.keys()) {
+        if (!first) {
+          sb.append(',');
+        }
+        sb.append(key).append('=').append(props.string(key, ""));
+        first = false;
+      }
+      return sb.append(']').toString();
+    }
+    return tag.stringValue("minecraft:air");
   }
 
   private int[] surfaceHeights(Nbt.Compound root) {

@@ -55,6 +55,7 @@ class MapPipelineTest {
    * Builds r.0.0.mca holding one chunk whose palette is grass_block over water
    * (columns x<8 are water-topped and must render transparent, x>=8 opaque
    * grass blended with the plains biome tint), then renders the region tile.
+   * Palette entries use the real-world compound form ({"Name":...,"Properties":...}).
    */
   @Test
   void syntheticRegionRendersExpectedSurface() throws IOException {
@@ -157,10 +158,24 @@ class MapPipelineTest {
     out.writeUTF("block_states");
     out.writeByte(9);
     out.writeUTF("palette");
-    out.writeByte(8);
+    out.writeByte(10);
     out.writeInt(2);
+    // unnamed compound list element: { Name: "minecraft:grass_block", Properties: { snowy: "false" } }
+    out.writeByte(8);
+    out.writeUTF("Name");
     out.writeUTF("minecraft:grass_block");
+    out.writeByte(10);
+    out.writeUTF("Properties");
+    out.writeByte(8);
+    out.writeUTF("snowy");
+    out.writeUTF("false");
+    out.writeByte(0);
+    out.writeByte(0);
+    // unnamed compound list element: { Name: "minecraft:water" }
+    out.writeByte(8);
+    out.writeUTF("Name");
     out.writeUTF("minecraft:water");
+    out.writeByte(0);
     out.writeByte(12);
     out.writeUTF("data");
     out.writeInt(data.length);
@@ -171,10 +186,14 @@ class MapPipelineTest {
     out.writeUTF("biomes");
     out.writeByte(9);
     out.writeUTF("palette");
-    out.writeByte(8);
+    out.writeByte(10);
     out.writeInt(1);
+    // unnamed compound list element: { Name: "minecraft:plains" }
+    out.writeByte(8);
+    out.writeUTF("Name");
     out.writeUTF("minecraft:plains");
-    out.writeByte(0);
+    out.writeByte(0); // end biome palette element
+    out.writeByte(0); // end biomes
     out.writeByte(0); // end section
     out.writeByte(0); // end root
     return baos.toByteArray();
