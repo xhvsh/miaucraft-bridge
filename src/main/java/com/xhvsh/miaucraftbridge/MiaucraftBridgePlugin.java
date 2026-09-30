@@ -62,6 +62,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private WhitelistSync whitelist;
   private ChatBridge chat;
   private BridgeOps ops;
+  private LiveMap liveMap;
 
   private volatile boolean firstConfigApplied = false;
 
@@ -122,6 +123,12 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     ops = new BridgeOps(this);
     ops.start();
 
+    if (getConfig().getBoolean("map.enabled", false)) {
+      liveMap = new LiveMap(this,
+          new SupabaseStorage(url, key, getLogger()), masterGate);
+      liveMap.start();
+    }
+
     getServer().getPluginManager().registerEvents(presence, this);
     getServer().getPluginManager().registerEvents(positions, this);
     getServer().getPluginManager().registerEvents(stats, this);
@@ -176,6 +183,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       updateTask = null;
     }
     if (ops != null) ops.stop();
+    if (liveMap != null) liveMap.stop();
     if (rest == null) return;
 
     try {
@@ -424,6 +432,10 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
 
   BridgeOps opsApi() {
     return ops;
+  }
+
+  LiveMap liveMap() {
+    return liveMap;
   }
 
   /** The jar this plugin was loaded from (JavaPlugin#getFile is protected). */

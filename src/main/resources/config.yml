@@ -66,3 +66,26 @@ update:
 bridge:
   retention:
     purge-hours: 6
+
+# Live HTML map (Phase 1-4). When enabled, region files are parsed straight
+# from the server's world files by worker threads and published as 512px PNG
+# tiles to a PUBLIC Supabase Storage bucket under <base-path>/<world>/<zoom>/<x>_<z>.png.
+# Note: the bucket must be public so the website's Leaflet tile layer can load
+# the PNGs directly; players can NEVER write to it (uploads use the secret key).
+map:
+  enabled: false
+  worlds:
+    - world
+  # Initial render radius in blocks around world spawn (~1000 = 3x3 regions).
+  radius: 1000
+  # Renderer threads; <=0 = half the machine's cores (capped at 6).
+  max-render-threads: -1
+  # Concurrent tile uploads to Supabase Storage.
+  upload-concurrency: 2
+  # How often (seconds) the plugin re-checks region-file mtimes for changes.
+  update-sweep-seconds: 120
+  # Highest file zoom = one 512px tile per region. Low zooms are composited.
+  max-zoom: 3
+  # Public bucket + optional path prefix (e.g. "live" -> live/<world>/0/0_0.png).
+  bucket: "maps"
+  base-path: ""
