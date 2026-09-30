@@ -81,6 +81,30 @@ class RemoteConfigTest {
   }
 
   @Test
+  void mapEnabledRequiresAnExplicitOptIn() {
+    assertFalse(RemoteConfig.fromJson(json("{\"version\":1}"), json("{}")).mapEnabled());
+    assertFalse(RemoteConfig.fromJson(json("{\"version\":1,\"map\":{\"enabled\":false}}"), json("{}")).mapEnabled());
+    assertTrue(RemoteConfig.fromJson(json("{\"version\":1,\"map\":{\"enabled\":true}}"), json("{}")).mapEnabled());
+  }
+
+  @Test
+  void mapStaysOffUntilASupportedConfigHasBeenSeen() {
+    RemoteConfig cfg = RemoteConfig.fromJson(null, json("{\"map\":{\"enabled\":true}}"));
+    assertFalse(cfg.mapEnabled());
+  }
+
+  @Test
+  void mapRespectsTheLocalKillSwitchAndRemoteMaster() {
+    RemoteConfig cfg = RemoteConfig.fromJson(
+        json("{\"version\":1,\"map\":{\"enabled\":true}}"), json("{}"));
+    AtomicBoolean gate = new AtomicBoolean(false);
+    cfg.setMasterEnabled(gate::get);
+    assertFalse(cfg.mapEnabled());
+    assertFalse(RemoteConfig.fromJson(
+        json("{\"version\":1,\"enabled\":false,\"map\":{\"enabled\":true}}"), json("{}")).mapEnabled());
+  }
+
+  @Test
   void collectorsStayOffUntilASupportedConfigHasBeenSeen() {
     RemoteConfig cfg = RemoteConfig.fromJson(null, json("{\"collectors\":{\"stats\":{\"enabled\":true}}}"));
     assertFalse(cfg.collectorEnabled("stats"));

@@ -10,6 +10,9 @@
   "status": {
     "heartbeat-seconds": 25
   },
+  "map": {
+    "enabled": true
+  },
   "collectors": {
     "presence": {
       "enabled": true,

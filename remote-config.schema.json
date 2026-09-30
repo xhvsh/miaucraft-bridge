@@ -33,6 +33,13 @@
         "heartbeat-seconds": { "type": "integer", "minimum": 15, "description": "How often server_status_public.updated_at is refreshed. Must stay well under the website's 30s stale threshold." }
       }
     },
+    "map": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "description": "Runs the live map renderer (parses the server's anvil regions into public PNG tiles). Defaults to OFF when absent: the target Supabase Storage bucket must already exist and be public." }
+      }
+    },
     "collectors": {
       "type": "object",
       "additionalProperties": false,

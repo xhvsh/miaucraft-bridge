@@ -44,6 +44,8 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private JsonObject overrides;
   private boolean masterEnabled;
   private String restSchema = "public";
+  private String supabaseUrl;
+  private String supabaseKey;
 
   private SupabaseRest rest;
   private SinkManager sinks;
@@ -110,6 +112,8 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     remoteConfig = RemoteConfig.fromJson(null, overrides);
     remoteConfig.setMasterEnabled(masterGate);
     restSchema = schema;
+    supabaseUrl = url;
+    supabaseKey = key;
 
     chat = new ChatBridge(this, sinks, rest, state, cfg, getLogger());
     presence = new PresenceTracker(sinks, cfg, chat);
@@ -123,11 +127,11 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     ops = new BridgeOps(this);
     ops.start();
 
-    if (getConfig().getBoolean("map.enabled", false)) {
-      liveMap = new LiveMap(this,
-          new SupabaseStorage(url, key, getLogger()), masterGate);
-      liveMap.start();
-    }
+    // The live map is toggled by the remote config (map.enabled) like every
+    // other behavior, so it can be flipped from GitHub without touching any
+    // server file. Until the first supported remote config lands, the local
+    // config.yml "map.enabled" is the initial state.
+    syncLiveMap();
 
     getServer().getPluginManager().registerEvents(presence, this);
     getServer().getPluginManager().registerEvents(positions, this);
@@ -348,6 +352,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     // when a value that is actually baked into them changed.
     rescheduleTasksIfChanged();
     scheduleUpdateChecksIfChanged();
+    syncLiveMap();
     if (cfg.version() > 0) {
       // The first-tick catalog sync cannot run (remote config not loaded yet),
       // so re-publish the catalog whenever a real config is applied.
@@ -356,6 +361,30 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       } catch (Exception ex) {
         getLogger().log(java.util.logging.Level.WARNING, "Achievement catalog sync failed", ex);
       }
+    }
+  }
+
+  /**
+   * Starts or stops the live map so its running state matches the effective
+   * switch (remote config map.enabled once one has been applied, otherwise the
+   * local config.yml value). Runs on the main thread via onEnable/applyConfig.
+   */
+  private void syncLiveMap() {
+    boolean want = remoteConfig.version() > 0
+        ? remoteConfig.mapEnabled()
+        : getConfig().getBoolean("map.enabled", false);
+    boolean have = liveMap != null;
+    if (want == have) return;
+    if (want) {
+      liveMap = new LiveMap(this,
+          new SupabaseStorage(supabaseUrl, supabaseKey, getLogger()),
+          () -> masterEnabled);
+      liveMap.start();
+      getLogger().info("map: started (remote config enabled)");
+    } else {
+      liveMap.stop();
+      liveMap = null;
+      getLogger().info("map: stopped (remote config disabled)");
     }
   }
 
@@ -532,6 +561,7 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
     lines.add("§7remote: §f" + remoteUrl);
     lines.add("§7config: §f" + (cfg.version() > 0 ? "v" + cfg.version() + " (" + cfg.source() + ")" : "not loaded"));
     lines.add("§7master enabled: §f" + masterEnabled);
+    lines.add("§7live map: §f" + (liveMap != null ? "on" : "off"));
     lines.add("§7supabase: §f" + restSchema + " §7(bridge traffic "
         + (rest.isEnabled() ? "§aon" : "§coff") + "§7)");
     lines.add("§7collectors: §f" + collectorSummary(cfg));

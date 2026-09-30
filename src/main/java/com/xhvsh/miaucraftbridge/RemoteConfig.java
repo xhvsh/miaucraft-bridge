@@ -229,6 +229,24 @@ public final class RemoteConfig {
     return (c == null || !c.has("enabled") || boolOf(c, "enabled", true)) && !isMasterDisabled();
   }
 
+  /**
+   * The live map switch (map.enabled). Unlike collectors it opts out by default:
+   * a missing section or missing key means off, because starting the renderer
+   * publishes tiles to a public bucket.
+   */
+  public boolean mapEnabled() {
+    if (version() <= 0) return false;
+    if (!masterEnabled()) return false;
+    JsonObject m = map();
+    if (m == null || !m.has("enabled")) return false;
+    return boolOf(m, "enabled", false) && !isMasterDisabled();
+  }
+
+  private JsonObject map() {
+    JsonElement c = merged.get("map");
+    return c != null && c.isJsonObject() ? c.getAsJsonObject() : null;
+  }
+
   private boolean masterEnabled() {
     BooleanSupplier supplier = masterEnabled;
     return supplier == null || supplier.getAsBoolean();
