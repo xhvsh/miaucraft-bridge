@@ -233,8 +233,8 @@ final class LiveMap {
     int maxZoom = plugin.getConfig().getInt("map.max-zoom", 3);
     this.maxZoom = Math.max(1, Math.min(5, maxZoom));
     this.radius = Math.max(512, plugin.getConfig().getInt("map.radius", 1000));
-    this.bootstrapPerTick = Math.max(8,
-        plugin.getConfig().getInt("map.bootstrap-num-chunks-per-tick", 64));
+    this.bootstrapPerTick = Math.max(1,
+        plugin.getConfig().getInt("map.bootstrap-num-chunks-per-tick", 4));
 
     int cores = Runtime.getRuntime().availableProcessors();
     int threads = plugin.getConfig().getInt("map.max-render-threads", -1);
@@ -278,6 +278,9 @@ final class LiveMap {
     Bukkit.getPluginManager().registerEvents(new MapEvents(this), plugin);
 
     for (String world : spawnX.keySet()) {
+      if (!masterEnabled.getAsBoolean()) {
+        break;
+      }
       bootstrap(world);
     }
 
@@ -602,6 +605,9 @@ final class LiveMap {
     List<int[]> coords = new ArrayList<>();
     int r2 = r * r;
     for (int dx = -r; dx <= r; dx++) {
+      if (!running || !masterEnabled.getAsBoolean()) {
+        return;
+      }
       for (int dz = -r; dz <= r; dz++) {
         if (dx * dx + dz * dz > r2) {
           continue;
@@ -627,7 +633,7 @@ final class LiveMap {
         int done = Math.min(coords.size(), cursor.get() + bootstrapPerTick);
         while (cursor.get() < done) {
           int[] c = coords.get(cursor.getAndIncrement());
-          if (!running) {
+          if (!running || !masterEnabled.getAsBoolean()) {
             return;
           }
           if (bw.isChunkGenerated(c[0], c[1])) {
