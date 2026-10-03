@@ -11,7 +11,7 @@
     "heartbeat-seconds": 25
   },
   "map": {
-    "enabled": false
+    "enabled": true
   },
   "collectors": {
     "presence": {
