@@ -35,6 +35,9 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
   private static final String DEFAULT_REMOTE_URL =
       "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main/remote-config.json";
 
+  /** Status snapshot cadence, in 5-second beats of the diagnostics task. */
+  private static final int STATUS_EVERY_BEATS = 3;
+
   private final List<BukkitTask> tasks = new ArrayList<>();
   private final Gson gson = new Gson();
 
@@ -261,8 +264,12 @@ public final class MiaucraftBridgePlugin extends JavaPlugin {
       // Own cadence rather than a remote setting: the console mirror and the
       // command queue are diagnostic plumbing, and a remote config must not be
       // able to stop the server from reporting on itself.
+      // The command queue is polled every 5s so owner actions feel immediate; the
+      // status snapshot only every 15s (the website treats it as stale after 90s),
+      // which cuts the idle write traffic of this lane by two thirds.
+      java.util.concurrent.atomic.AtomicInteger beat = new java.util.concurrent.atomic.AtomicInteger();
       tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
-        ops.writeStatus();
+        if (beat.getAndIncrement() % STATUS_EVERY_BEATS == 0) ops.writeStatus();
         ops.pollCommands();
       }, 100L, 100L));
       // Main thread: the summary reads the online player count.

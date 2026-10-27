@@ -41,8 +41,8 @@ max-batch-size: 300
 # remote.url by swapping the file name to plugin-update.json, so pointing
 # remote.url at a local server also points updates there.
 #
-# Trust rules enforced by the code: the manifest MUST include a valid sha256,
-# downloads must be https, the jar is size-capped while streaming, and the
+# Trust rules enforced by the code: the manifest MUST include a valid sha256
+# and a valid release signature (see update.require-signature), downloads must be https, the jar is size-capped while streaming, and the
 # previous jar is kept as <jar>.bak until the relaunched server survives.
 update:
   enabled: true
@@ -58,6 +58,14 @@ update:
   # command when relaunching, e.g. "java -Xmx2048M -jar paper.jar nogui".
   # Must be a single line.
   restart-command: ""
+  # The manifest must carry an Ed25519 signature made with the maintainer's
+  # release key (compiled into the plugin), so a compromised GitHub account
+  # cannot push code to your server. Only set this to false for a LOCAL dev
+  # manifest that dev/publish-update.ps1 wrote (it is not signed), never in
+  # production. Leave public-key blank to use the built-in release key; a
+  # private fork can put its own Base64 X.509 Ed25519 key here.
+  require-signature: true
+  public-key: ""
 
 # Bridge diagnostics retention. The plugin itself calls purge_bridge_history()
 # on this schedule - there is no pg_cron on the Supabase project. The API caps

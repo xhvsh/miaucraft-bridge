@@ -88,6 +88,8 @@ public final class Updater {
   private final boolean autoApply;
   private final boolean relaunch;
   private final String restartCommand;
+  private final boolean requireSignature;
+  private final java.security.PublicKey verifyKey;
   private final HttpClient http =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
   private final AtomicBoolean checking = new AtomicBoolean(false);
@@ -106,6 +108,8 @@ public final class Updater {
     this.autoApply = plugin.getConfig().getBoolean("update.auto-apply", false);
     this.relaunch = plugin.getConfig().getBoolean("update.relaunch", true);
     this.restartCommand = plugin.getConfig().getString("update.restart-command", "");
+    this.requireSignature = plugin.getConfig().getBoolean("update.require-signature", true);
+    this.verifyKey = loadVerifyKey(plugin.getConfig().getString("update.public-key", ""));
 
     String configured = plugin.getConfig().getString("update.manifest-url", "");
     if (configured != null && !configured.isBlank()) {
@@ -114,6 +118,28 @@ public final class Updater {
       this.manifestUrl = remoteUrl.replace("remote-config.json", "plugin-update.json");
     } else {
       this.manifestUrl = DEFAULT_MANIFEST;
+    }
+  }
+
+  /**
+   * The key updates must be signed with: the compiled-in release key, or a
+   * local override from config.yml (for a private fork or a dev manifest).
+   * A malformed override falls back to the built-in key instead of disabling
+   * verification.
+   */
+  private java.security.PublicKey loadVerifyKey(String override) {
+    String source = override == null || override.isBlank() ? UpdateSignature.RELEASE_PUBLIC_KEY : override;
+    try {
+      return UpdateSignature.parsePublicKey(source);
+    } catch (Exception e) {
+      log.warning("update.public-key is not a valid Ed25519 key (" + e.getMessage()
+          + ") - using the built-in release key");
+      try {
+        return UpdateSignature.parsePublicKey(UpdateSignature.RELEASE_PUBLIC_KEY);
+      } catch (Exception fatal) {
+        log.severe("built-in release key is unusable - updates will be refused: " + fatal);
+        return null;
+      }
     }
   }
 
@@ -240,8 +266,15 @@ public final class Updater {
       return lastResult;
     }
 
+    // Only a manifest that would actually install something has to be signed;
+    // an unsigned "same version" manifest is simply up to date (above).
+    if (requireSignature && !UpdateSignature.verify(verifyKey, version, sha, string(manifest, "signature"))) {
+      throw new IllegalStateException("manifest for v" + version
+          + " has no valid release signature - refusing an update that was not signed by the maintainer");
+    }
+
     Files.createDirectories(updateDir);
-    Path dest = updateDir.resolve("miaucraft-bridge-plugin-" + version + ".jar");
+    Path dest =updateDir.resolve("miaucraft-bridge-plugin-" + version + ".jar");
     if (Files.exists(dest) && sha.equalsIgnoreCase(sha256(dest))) {
       markStaged(dest, version);
       lastResult = "v" + version + " already staged (sha " + shortSha(dest) + ")";

@@ -36,6 +36,7 @@ public final class ChatBridge {
 
   private static final int RELAY_ID_MEMORY = 500;
   private static final int DEFAULT_MAX_LENGTH = 500;
+  private static final int MAX_USERNAME_LENGTH = 32;
 
   /**
    * How long a chat row may wait for the shared flush cycle before it gets a
@@ -267,6 +268,7 @@ public final class ChatBridge {
     String prefix = cfg.strVal("collectors.chat.web-prefix", "[web] ");
     TextColor prefixColor = color(cfg.strVal("collectors.chat.web-prefix-color", "AQUA"), NamedTextColor.AQUA);
     String bodyFormat = cfg.strVal("collectors.chat.web-body-format", "<{username}> {message}");
+    int maxLength = cfg.collectorInt("chat", "max-length", DEFAULT_MAX_LENGTH);
     TextColor bodyColor = color(cfg.strVal("collectors.chat.web-body-color", "WHITE"), NamedTextColor.WHITE);
 
     Set<String> already = relayedIds();
@@ -291,10 +293,15 @@ public final class ChatBridge {
 
         if (id != null && already.contains(id)) continue;
 
-        String username = row.has("username") && !row.get("username").isJsonNull()
-            ? row.get("username").getAsString() : "someone";
-        String message = row.has("message") && !row.get("message").isJsonNull()
-            ? row.get("message").getAsString() : "";
+        // The row is untrusted input (any signed-in site account can insert one),
+        // and it is broadcast to every player: strip control characters and cap the
+        // size so a pathological row cannot flood or crash clients. This is the
+        // inbound web path only; the outbound game -> web path is left as it was.
+        String username = sanitize(row.has("username") && !row.get("username").isJsonNull()
+            ? row.get("username").getAsString() : "", MAX_USERNAME_LENGTH);
+        if (username.isEmpty()) username = "someone";
+        String message = sanitize(row.has("message") && !row.get("message").isJsonNull()
+            ? row.get("message").getAsString() : "", maxLength);
         if (message.isBlank()) continue;
         String body = bodyFormat
             .replace("{username}", username)

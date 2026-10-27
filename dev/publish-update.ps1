@@ -53,7 +53,7 @@ $manifest = [ordered]@{
   version = $Version
   url     = "$BaseUrl/jars/$name"
   sha256  = $sha
-  notes   = "Local dev build $Version"
+  notes   = "Local dev build $Version (UNSIGNED - set update.require-signature: false on the dev server)"
 }
 $json = $manifest | ConvertTo-Json
 WriteNoBom -Path (Join-Path $devDir "plugin-update.json") -Text $json

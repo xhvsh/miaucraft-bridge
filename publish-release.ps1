@@ -17,6 +17,10 @@
 # so the shim there must be bumped on every release).
 param(
   [Parameter(Mandatory = $true)][string]$Version,
+  # Ed25519 private key made by `java dev/ReleaseSigner.java gen <file>`. Keep it
+  # outside the repository. Servers refuse an update whose manifest is not signed
+  # with the matching public key (UpdateSignature.RELEASE_PUBLIC_KEY).
+  [string]$SigningKey = (Join-Path $env:USERPROFILE ".miaucraft\release-signing.key"),
   [string]$BaseUrl = "https://raw.githubusercontent.com/xhvsh/miaucraft-bridge/main",
   [string]$SiteRepo = "",
   [switch]$NoTests
@@ -107,11 +111,21 @@ $dest = Join-Path $releasesDir $name
 Copy-Item -LiteralPath $built -Destination $dest -Force
 
 $sha = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLower()
+
+if (-not (Test-Path -LiteralPath $SigningKey)) {
+  throw "Signing key not found at $SigningKey. Create one with: java dev/ReleaseSigner.java gen `"$SigningKey`" (then embed the printed public key in UpdateSignature.RELEASE_PUBLIC_KEY and rebuild)."
+}
+$signOut = & java (Join-Path $scriptRoot "dev\ReleaseSigner.java") sign $SigningKey $Version $sha
+if ($LASTEXITCODE -ne 0) { throw "Signing failed (java exit $LASTEXITCODE)." }
+$signature = ($signOut | Select-Object -First 1).ToString().Trim()
+if ([string]::IsNullOrWhiteSpace($signature)) { throw "Signing produced no signature." }
+
 $manifest = [ordered]@{
-  version = $Version
-  url     = "$BaseUrl/releases/$name"
-  sha256  = $sha
-  notes   = "Release $Version"
+  version   = $Version
+  url       = "$BaseUrl/releases/$name"
+  sha256    = $sha
+  signature = $signature
+  notes     = "Release $Version"
 }
 $json = $manifest | ConvertTo-Json
 WriteNoBom -Path (Join-Path $scriptRoot "plugin-update.json") -Text $json
@@ -121,6 +135,7 @@ WriteNoBom -Path (Join-Path $scriptRoot "plugin-update.json") -Text $json
 $written = Get-Content -LiteralPath (Join-Path $scriptRoot "plugin-update.json") -Raw | ConvertFrom-Json
 if ($written.version -ne $Version) { throw "plugin-update.json has the wrong version" }
 if ($written.sha256 -ne $sha) { throw "plugin-update.json has the wrong sha256" }
+if ([string]::IsNullOrWhiteSpace($written.signature)) { throw "plugin-update.json has no signature" }
 if (-not $written.url.StartsWith("https://")) { throw "plugin-update.json url must be https" }
 
 Write-Host ""

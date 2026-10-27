@@ -1,0 +1,12 @@
+{
+  "name": "miaucraft-db-tests",
+  "private": true,
+  "type": "module",
+  "description": "SQL regression tests for the Supabase security migration (runs on an in-process Postgres, no Docker, no network).",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.12"
+  }
+}
